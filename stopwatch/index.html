@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stopwatch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #0e0e10;
+    color: #e8e8ee;
+    font-family: 'DM Sans', sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /*
+    All sizing is driven by a single CSS variable --s (scale unit in px),
+    set by JS on resize. Every dimension is a multiple of --s.
+    Base design: 100 units wide per dial, layout ~380 units tall total.
+  */
+  .container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: calc(var(--s) * 4);
+  }
+
+  .time-display {
+    font-family: 'Roboto Mono', monospace;
+    font-size: calc(var(--s) * 10.3);
+    letter-spacing: 0;
+    color: #e8e8ee;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+    line-height: 1;
+    user-select: none;
+    white-space: nowrap;
+  }
+  .time-display .sep { color: #8888a8; }
+  .time-display .ms  { color: #e05a2b; }
+
+  .dials {
+    display: flex;
+    gap: calc(var(--s) * 4);
+    align-items: flex-start;
+    justify-content: center;
+  }
+  .dial-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: calc(var(--s) * 1);
+  }
+  .dial-wrap svg {
+    width: calc(var(--s) * 22);
+    height: calc(var(--s) * 22);
+    display: block;
+  }
+  .dial-lbl {
+    font-size: calc(var(--s) * 1.4);
+    color: #a0a0bc;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 400;
+  }
+
+  .buttons { display: flex; gap: calc(var(--s) * 2); }
+
+  .btn {
+    font-family: 'DM Sans', sans-serif;
+    font-size: calc(var(--s) * 1.8);
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    padding: calc(var(--s) * 1.1) calc(var(--s) * 3.5);
+    border-radius: calc(var(--s) * 0.5);
+    border: calc(var(--s) * 0.2) solid #60608a;
+    background: #26262e;
+    color: #e8e8ee;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s;
+    min-width: calc(var(--s) * 14);
+    text-transform: uppercase;
+  }
+  .btn:hover  { background: #32323e; border-color: #9090b8; }
+  .btn:active { transform: scale(0.97); }
+
+  #btn-start.running {
+    border-color: #e05a2b;
+    color: #e05a2b;
+    background: rgba(224,90,43,0.18);
+  }
+  #btn-start.running:hover { background: rgba(224,90,43,0.28); }
+</style>
+</head>
+<body>
+<div class="container" id="container">
+
+  <div class="time-display" aria-live="off" aria-label="Elapsed time">
+    <span id="d-h">00</span><span class="sep">:</span><span id="d-m">00</span><span class="sep">:</span><span id="d-s">00</span><span class="sep">.</span><span class="ms" id="d-ms">000</span>
+  </div>
+
+  <div class="dials" id="dials-row"></div>
+
+  <div class="buttons">
+    <button class="btn" id="btn-start">Start</button>
+    <button class="btn" id="btn-reset">Reset</button>
+  </div>
+
+</div>
+<script>
+(function () {
+  /*
+    Layout in "design units" (du):
+      Time row height:  9 du (font-size) + line-height ~ 9 du
+      Dials row height: 22 du (svg) + 1 du (gap) + 1.4 du (label) ~ 24.4 du
+      Button row height: 1.1*2 + 1.8 ~ 4 du
+      3x gaps between rows: 3 * 4 = 12 du
+      Top+bottom padding: 2 * 4 = 8 du
+      Total height ~ 9 + 24.4 + 4 + 12 + 8 = 57.4 du  → use 60 du
+
+      Dials total width: 3 * 22 + 2 * 4 = 74 du
+      Time display width: "00:00:00.000" = 12 chars * ~5.5du = 66 du (Share Tech Mono ~0.6em wide)
+      Button row width: 2 * 14 + 1 * 2 = 30 du  (min-width based)
+      Widest element ~ 74 du  → use 76 du (add side padding 2*2=4 → 76 du total)
+
+    Scale factor s = min(W / 76, H / 60)   [px per du]
+    Clamped to minimum 1.2 px/du so tiny screens stay readable.
+  */
+  const DU_W = 76, DU_H = 62;
+  const MIN_S = 1.2;
+
+  const container = document.getElementById('container');
+
+  function applyScale() {
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const s = Math.max(MIN_S, Math.min(W / DU_W, H / DU_H));
+    document.documentElement.style.setProperty('--s', s + 'px');
+  }
+
+  applyScale();
+  window.addEventListener('resize', applyScale);
+
+  /* ── Build dials ── */
+  const LABELS = ['Hundreds', 'Tens', 'Units'];
+  const dialsRow = document.getElementById('dials-row');
+  const dH = document.getElementById('d-h');
+  const dM = document.getElementById('d-m');
+  const dS = document.getElementById('d-s');
+  const dMs = document.getElementById('d-ms');
+  const btnStart = document.getElementById('btn-start');
+  const btnReset = document.getElementById('btn-reset');
+
+  const NS = 'http://www.w3.org/2000/svg';
+  const VB = 200, CX = 100, CY = 100, R = 86;
+
+  function buildDial(idx) {
+    const wrap = document.createElement('div');
+    wrap.className = 'dial-wrap';
+
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${VB} ${VB}`);
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', LABELS[idx] + ' milliseconds dial');
+
+    const ring = document.createElementNS(NS, 'circle');
+    ring.setAttribute('cx', CX); ring.setAttribute('cy', CY); ring.setAttribute('r', R + 7);
+    ring.setAttribute('fill', '#1e1e2a');
+    ring.setAttribute('stroke', '#6868a0');
+    ring.setAttribute('stroke-width', '2.5');
+    svg.appendChild(ring);
+
+    const face = document.createElementNS(NS, 'circle');
+    face.setAttribute('cx', CX); face.setAttribute('cy', CY); face.setAttribute('r', R);
+    face.setAttribute('fill', '#1e1e2a');
+    svg.appendChild(face);
+
+    for (let i = 0; i < 100; i++) {
+      const ang = (i / 100) * 2 * Math.PI - Math.PI / 2;
+      const isMaj = i % 10 === 0;
+      const innerR = isMaj ? R - 16 : R - 9;
+      const line = document.createElementNS(NS, 'line');
+      line.setAttribute('x1', CX + R * Math.cos(ang));
+      line.setAttribute('y1', CY + R * Math.sin(ang));
+      line.setAttribute('x2', CX + innerR * Math.cos(ang));
+      line.setAttribute('y2', CY + innerR * Math.sin(ang));
+      line.setAttribute('stroke', isMaj ? 'rgba(220,220,255,0.90)' : 'rgba(200,200,240,0.35)');
+      line.setAttribute('stroke-width', isMaj ? '2.2' : '1');
+      line.setAttribute('stroke-linecap', 'round');
+      svg.appendChild(line);
+    }
+
+    for (let i = 0; i < 10; i++) {
+      const ang = (i / 10) * 2 * Math.PI - Math.PI / 2;
+      const lr = R - 29;
+      const t = document.createElementNS(NS, 'text');
+      t.setAttribute('x', CX + lr * Math.cos(ang));
+      t.setAttribute('y', CY + lr * Math.sin(ang));
+      t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('dominant-baseline', 'central');
+      t.setAttribute('font-size', '13');
+      t.setAttribute('font-family', "'Roboto Mono', monospace");
+      t.setAttribute('fill', '#c8c8e8');
+      t.textContent = i;
+      svg.appendChild(t);
+    }
+
+    const needleG = document.createElementNS(NS, 'g');
+    needleG.id = `needle-${idx}`;
+    needleG.setAttribute('transform', `rotate(0, ${CX}, ${CY})`);
+    const poly = document.createElementNS(NS, 'polygon');
+    const tipR = R - 20, baseOff = 12, baseW = 3.5;
+    poly.setAttribute('points',
+      `${CX},${CY - tipR} ${CX - baseW},${CY + baseOff} ${CX + baseW},${CY + baseOff}`);
+    poly.setAttribute('fill', '#e05a2b');
+    needleG.appendChild(poly);
+    svg.appendChild(needleG);
+
+    const cap = document.createElementNS(NS, 'circle');
+    cap.setAttribute('cx', CX); cap.setAttribute('cy', CY); cap.setAttribute('r', 4.5);
+    cap.setAttribute('fill', '#e05a2b');
+    svg.appendChild(cap);
+
+    wrap.appendChild(svg);
+
+    const lbl = document.createElement('div');
+    lbl.className = 'dial-lbl';
+    lbl.textContent = LABELS[idx];
+    wrap.appendChild(lbl);
+
+    dialsRow.appendChild(wrap);
+  }
+
+  for (let i = 0; i < 3; i++) buildDial(i);
+
+  /* ── Timer ── */
+  let startTs = null, elapsed = 0, running = false, raf = null;
+  function pad(n, w) { return String(n).padStart(w, '0'); }
+
+  function render(totalMs) {
+    const ms = Math.floor(totalMs);
+    dH.textContent  = pad(Math.floor(ms / 3600000), 2);
+    dM.textContent  = pad(Math.floor((ms % 3600000) / 60000), 2);
+    dS.textContent  = pad(Math.floor((ms % 60000) / 1000), 2);
+    const ms3 = ms % 1000;
+    dMs.textContent = pad(ms3, 3);
+
+    const fracs = [ms3 / 1000, (ms3 % 100) / 100, (ms3 % 10) / 10];
+    for (let i = 0; i < 3; i++) {
+      const el = document.getElementById(`needle-${i}`);
+      if (el) el.setAttribute('transform', `rotate(${fracs[i] * 360}, ${CX}, ${CY})`);
+    }
+  }
+
+  function tick() {
+    if (!running) return;
+    render(elapsed + (performance.now() - startTs));
+    raf = requestAnimationFrame(tick);
+  }
+
+  btnStart.addEventListener('click', () => {
+    if (!running) {
+      running = true; startTs = performance.now();
+      btnStart.textContent = 'Pause';
+      btnStart.classList.add('running');
+      raf = requestAnimationFrame(tick);
+    } else {
+      running = false;
+      elapsed += performance.now() - startTs;
+      cancelAnimationFrame(raf);
+      btnStart.textContent = 'Start';
+      btnStart.classList.remove('running');
+    }
+  });
+
+  btnReset.addEventListener('click', () => {
+    running = false; cancelAnimationFrame(raf);
+    elapsed = 0; startTs = null;
+    btnStart.textContent = 'Start';
+    btnStart.classList.remove('running');
+    render(0);
+  });
+
+  render(0);
+})();
+</script>
+</body>
+</html>
