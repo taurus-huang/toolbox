@@ -151,6 +151,29 @@
 
   .hidden{display:none !important;}
 
+  /* Drag & drop file loading */
+  .col-label.drag-over{
+    outline:2px dashed var(--accent);
+    outline-offset:-2px;
+    background:rgba(37,112,194,0.10);
+  }
+  .pane{position:relative;}
+  .pane.drag-over::after{
+    content:"📂 Drop file to load";
+    position:absolute;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:rgba(37,112,194,0.10);
+    border:2px dashed var(--accent);
+    color:var(--accent);
+    font-size:16px;
+    font-weight:600;
+    pointer-events:none;
+    z-index:50;
+  }
+
   /* Intra-line character diff highlight */
   .line.diff-mod .char-diff{
     background:rgba(180,140,0,0.35);
@@ -989,6 +1012,96 @@ async function refreshFile(col){
 }
 
 /* ======================================================================
+   Drag & Drop file loading (path bar + editor content area)
+   ====================================================================== */
+
+// Only treat the drag as a file drag if the browser reports an actual
+// file payload — this keeps normal text drag/drop inside the editable
+// content untouched.
+function isFileDrag(e){
+  return !!(e.dataTransfer && e.dataTransfer.types && Array.from(e.dataTransfer.types).includes('Files'));
+}
+
+async function loadDroppedFile(col, dt){
+  // Prefer a re-readable FileSystemFileHandle (Chrome/Edge) so the Refresh
+  // button keeps working after a drag & drop load, same as via Open.
+  // Per the File System Access API, getAsFileSystemHandle() must be called
+  // synchronously off the drop event before any other await, so we grab it
+  // immediately instead of looping with awaits in between.
+  let handle = null;
+  let file = null;
+  try{
+    if(dt.items && dt.items.length){
+      const fileItem = Array.from(dt.items).find(it => it.kind === 'file');
+      if(fileItem){
+        if(typeof fileItem.getAsFileSystemHandle === 'function'){
+          const h = await fileItem.getAsFileSystemHandle();
+          if(h && h.kind === 'file'){ handle = h; file = await h.getFile(); }
+        }
+        if(!file) file = fileItem.getAsFile();
+      }
+    }
+    if(!file && dt.files && dt.files.length) file = dt.files[0];
+  }catch(err){
+    if(!file && dt.files && dt.files.length) file = dt.files[0];
+  }
+  if(!file){ setStatus(`${colLabel(col)}: no file detected in the drop`); return; }
+
+  try{
+    const text = await file.text();
+    pushHistory(col);
+    state.cols[col].text = text;
+    state.cols[col].fullPath = file.webkitRelativePath || file.name;
+    state.cols[col].userLoaded = true;
+    state.cols[col].handle = handle; // null if this browser can't give a reusable handle
+    syncPathInput(col);
+    recompute();
+    setStatus(`Loaded ${colLabel(col)} via drag & drop: ${state.cols[col].fullPath}`);
+  }catch(err){
+    setStatus(`${colLabel(col)}: failed to read dropped file`);
+  }
+}
+
+function setupDropZone(el, col){
+  if(!el) return;
+  let dragDepth = 0;
+  el.addEventListener('dragenter', (e)=>{
+    if(!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth++;
+    el.classList.add('drag-over');
+  });
+  el.addEventListener('dragover', (e)=>{
+    if(!isFileDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  });
+  el.addEventListener('dragleave', (e)=>{
+    if(!isFileDrag(e)) return;
+    dragDepth = Math.max(0, dragDepth-1);
+    if(dragDepth===0) el.classList.remove('drag-over');
+  });
+  el.addEventListener('drop', (e)=>{
+    if(!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    el.classList.remove('drag-over');
+    loadDroppedFile(col, e.dataTransfer);
+  });
+}
+
+function setupAllDropZones(){
+  // Path bar: drop a file onto a path row to load it into that column.
+  setupDropZone(document.getElementById('path-left').closest('.col-label'), 'left');
+  setupDropZone(document.getElementById('path-mid').closest('.col-label'), 'mid');
+  setupDropZone(document.getElementById('path-right').closest('.col-label'), 'right');
+  // Content area: drop a file anywhere on a pane to load it into that column.
+  setupDropZone(document.getElementById('pane-left'), 'left');
+  setupDropZone(document.getElementById('pane-mid'), 'mid');
+  setupDropZone(document.getElementById('pane-right'), 'right');
+}
+
+/* ======================================================================
    Status bar helper
    ====================================================================== */
 function setStatus(msg){
@@ -1155,6 +1268,7 @@ syncPathInput('mid');
 syncPathInput('right');
 setupScrollSync();
 setupGutterClicks();
+setupAllDropZones();
 recompute();
 setStatus('Ready');
 </script>
