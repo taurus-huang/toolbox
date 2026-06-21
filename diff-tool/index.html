@@ -1,0 +1,1162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diff Tool</title>
+<style>
+  :root{
+    --bg:#f0f1f4;
+    --panel:#ffffff;
+    --toolbar:#e4e6ea;
+    --border:#c8cad0;
+    --text:#1e1f22;
+    --muted:#6b6e76;
+    --accent:#2570c2;
+    --line-num:#8a8d96;
+    --diff-mod:#7a7a00;
+    --diff-mod-border:#c8c800;
+    --diff-add:#1a7a2a;
+    --diff-add-border:#4caf50;
+    --diff-del:#b02020;
+    --diff-del-border:#f44336;
+    --diff-mod-line:#fffde6;
+    --diff-add-line:#e8f5e9;
+    --diff-del-line:#ffebee;
+    --btn-bg:#d8dae0;
+    --btn-hover:#c8cad2;
+    --gutter-bg:#e8eaee;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;font-family:"Segoe UI","Microsoft JhengHei",sans-serif;background:var(--bg);color:var(--text);font-size:13px;}
+  body{display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+
+  /* Top toolbar */
+  .toolbar{
+    display:flex;align-items:center;gap:4px;
+    background:var(--toolbar);border-bottom:1px solid var(--border);
+    padding:6px 8px;flex-shrink:0;flex-wrap:wrap;
+  }
+  .toolbar .group{display:flex;gap:2px;align-items:center;padding:0 6px;border-right:1px solid var(--border);}
+  .toolbar .group:last-child{border-right:none;}
+  .tbtn{
+    background:var(--btn-bg);border:1px solid var(--border);color:var(--text);
+    padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px;
+    display:flex;align-items:center;gap:5px;white-space:nowrap;
+    transition:background .12s;
+  }
+  .tbtn:hover{background:var(--btn-hover);}
+  .tbtn:active{background:var(--accent);}
+  .tbtn.active{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .tbtn:disabled{opacity:.4;cursor:default;}
+  .tbtn .ico{font-size:14px;line-height:1;}
+
+  /* Path bar */
+  .pathbar{
+    display:flex;flex-direction:column;
+    background:var(--toolbar);border-bottom:1px solid var(--border);flex-shrink:0;
+  }
+  .pathrow{display:flex;align-items:center;}
+  .pathrow .col-label{
+    flex:1;display:flex;align-items:center;gap:4px;
+    padding:4px 6px;border-right:1px solid var(--border);min-width:0;
+  }
+  .pathrow .col-label:last-child{border-right:none;}
+  .pathrow input[type=text]{
+    flex:1;background:#f8f9fb;border:1px solid var(--border);color:var(--text);
+    padding:4px 6px;border-radius:3px;font-size:12px;min-width:0;
+  }
+  .pathrow .filebtns{display:flex;gap:2px;flex-shrink:0;}
+  .pathrow .filebtns .tbtn{padding:4px 7px;}
+
+  /* Main editor area */
+  .editor-wrap{flex:1;display:flex;overflow:hidden;position:relative;}
+  .pane{
+    flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden;background:var(--panel);
+  }
+  .pane-header{
+    padding:4px 8px;background:var(--toolbar);border-bottom:1px solid var(--border);
+    font-size:11px;color:var(--muted);flex-shrink:0;
+  }
+  .pane-scroll{
+    flex:1;overflow-y:auto;overflow-x:auto;position:relative;font-family:Consolas,"Courier New",monospace;font-size:13px;line-height:20px;
+  }
+  .pane-scroll::-webkit-scrollbar{width:12px;height:12px;}
+  .pane-scroll::-webkit-scrollbar-track{background:var(--panel);}
+  .pane-scroll::-webkit-scrollbar-thumb{background:#b0b4bc;border-radius:6px;}
+  .pane-scroll::-webkit-scrollbar-thumb:hover{background:#9096a0;}
+
+  .line{
+    display:flex;min-height:20px;position:relative;
+  }
+  .line .num{
+    width:46px;flex-shrink:0;text-align:right;padding-right:8px;color:var(--line-num);
+    user-select:none;font-size:12px;line-height:20px;background:var(--gutter-bg);
+    border-right:1px solid var(--border);
+  }
+  .line .content{
+    flex:1;padding:0 8px;white-space:pre;outline:none;line-height:20px;min-height:20px;
+    cursor:text;min-width:600px;
+  }
+  .line.empty .content{background:repeating-linear-gradient(45deg, rgba(0,0,0,0.03) 0px, rgba(0,0,0,0.03) 4px, transparent 4px, transparent 8px);}
+  .line.empty .num{color:transparent;}
+
+  /* diff highlight backgrounds */
+  .line.diff-mod{background:var(--diff-mod-line);}
+  .line.diff-add{background:var(--diff-add-line);}
+  .line.diff-del{background:var(--diff-del-line);}
+  .line.diff-mod .num{background:var(--diff-mod-border);color:#fff;}
+  .line.diff-add .num{background:var(--diff-add-border);color:#fff;}
+  .line.diff-del .num{background:var(--diff-del-border);color:#fff;}
+  .line.diff-current{box-shadow:inset 0 0 0 1px var(--accent);}
+
+  /* Hover action icons (shown on the line, at right edge of content) */
+  .line .actions{
+    position:absolute;right:4px;top:0;height:20px;display:none;
+    align-items:center;gap:3px;z-index:5;
+  }
+  .line:hover .actions{display:flex;}
+  .actbtn{
+    width:18px;height:18px;border-radius:3px;background:#c8cad0;border:1px solid var(--border);
+    color:#1e1f22;display:flex;align-items:center;justify-content:center;font-size:11px;
+    cursor:pointer;line-height:1;padding:0;
+  }
+  .actbtn:hover{background:var(--accent);}
+
+  /* Gutter (between panes) showing overview diff markers */
+  .gutter{
+    width:30px;flex-shrink:0;background:var(--gutter-bg);border-left:1px solid var(--border);border-right:1px solid var(--border);
+    position:relative;overflow:hidden;
+  }
+  .gutter-track{position:absolute;left:0;top:0;width:100%;}
+  .gutter .marker{
+    position:absolute;left:4px;right:4px;border-radius:2px;cursor:pointer;opacity:.85;
+  }
+  .gutter .marker.mod{background:var(--diff-mod-border);}
+  .gutter .marker.add{background:var(--diff-add-border);}
+  .gutter .marker.del{background:var(--diff-del-border);}
+  .gutter .marker:hover{opacity:1;outline:1px solid #333;}
+
+  /* status bar */
+  .statusbar{
+    padding:4px 10px;background:var(--toolbar);border-top:1px solid var(--border);
+    font-size:11px;color:var(--muted);display:flex;justify-content:space-between;flex-shrink:0;
+  }
+  .legend{display:flex;gap:14px;align-items:center;}
+  .legend span{display:flex;align-items:center;gap:5px;}
+  .legend .swatch{width:12px;height:12px;border-radius:2px;display:inline-block;}
+  .swatch.mod{background:var(--diff-mod-border);}
+  .swatch.add{background:var(--diff-add-border);}
+  .swatch.del{background:var(--diff-del-border);}
+
+  .hidden{display:none !important;}
+
+  /* Intra-line character diff highlight */
+  .line.diff-mod .char-diff{
+    background:rgba(180,140,0,0.35);
+    border-radius:2px;
+    outline:1px solid rgba(180,130,0,0.5);
+  }
+  .line.diff-add .char-diff{
+    background:rgba(50,160,70,0.35);
+    border-radius:2px;
+    outline:1px solid rgba(50,160,70,0.5);
+  }
+  .line.diff-del .char-diff{
+    background:rgba(200,50,50,0.35);
+    border-radius:2px;
+    outline:1px solid rgba(200,50,50,0.5);
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ TOP TOOLBAR ============ -->
+<div class="toolbar">
+  <div class="group">
+    <button class="tbtn active" id="btn-2way" title="2-way compare">2️⃣ 2-way</button>
+    <button class="tbtn" id="btn-3way" title="3-way compare">3️⃣ 3-way</button>
+  </div>
+  <div class="group">
+    <button class="tbtn" id="nav-first" title="First difference">⏫ First</button>
+    <button class="tbtn" id="nav-prev" title="Previous difference">🔼 Prev</button>
+    <button class="tbtn" id="nav-next" title="Next difference">🔽 Next</button>
+    <button class="tbtn" id="nav-last" title="Last difference">⏬ Last</button>
+  </div>
+  <div class="group">
+    <span id="diff-counter" style="color:var(--muted);font-size:12px;">Diff: 0 / 0</span>
+  </div>
+  <div class="group">
+    <button class="tbtn" id="btn-recompute" title="Re-run diff">🔄 Re-diff</button>
+  </div>
+</div>
+
+<!-- ============ PATH BAR ============ -->
+<div class="pathbar" id="pathbar">
+  <div class="pathrow">
+    <div class="col-label">
+      <input type="text" id="path-left" placeholder="Left file path...">
+      <div class="filebtns">
+        <button class="tbtn" data-act="undo" data-col="left" title="Undo">↩️</button>
+        <button class="tbtn" data-act="redo" data-col="left" title="Redo">↪️</button>
+        <button class="tbtn" data-act="refresh" data-col="left" title="Refresh">🔄</button>
+        <button class="tbtn" data-act="open" data-col="left" title="Open">📂</button>
+        <button class="tbtn" data-act="save" data-col="left" title="Save">💾</button>
+      </div>
+    </div>
+    <div class="col-label" id="pathcol-mid">
+      <input type="text" id="path-mid" placeholder="Middle file path...">
+      <div class="filebtns">
+        <button class="tbtn" data-act="undo" data-col="mid" title="Undo">↩️</button>
+        <button class="tbtn" data-act="redo" data-col="mid" title="Redo">↪️</button>
+        <button class="tbtn" data-act="refresh" data-col="mid" title="Refresh">🔄</button>
+        <button class="tbtn" data-act="open" data-col="mid" title="Open">📂</button>
+        <button class="tbtn" data-act="save" data-col="mid" title="Save">💾</button>
+      </div>
+    </div>
+    <div class="col-label">
+      <input type="text" id="path-right" placeholder="Right file path...">
+      <div class="filebtns">
+        <button class="tbtn" data-act="undo" data-col="right" title="Undo">↩️</button>
+        <button class="tbtn" data-act="redo" data-col="right" title="Redo">↪️</button>
+        <button class="tbtn" data-act="refresh" data-col="right" title="Refresh">🔄</button>
+        <button class="tbtn" data-act="open" data-col="right" title="Open">📂</button>
+        <button class="tbtn" data-act="save" data-col="right" title="Save">💾</button>
+      </div>
+    </div>
+  </div>
+</div>
+<input type="file" id="file-input" class="hidden">
+
+<!-- ============ EDITOR AREA ============ -->
+<div class="editor-wrap" id="editor-wrap">
+  <div class="pane" id="pane-left">
+    <div class="pane-scroll" id="scroll-left"><div id="lines-left"></div></div>
+  </div>
+  <div class="gutter" id="gutter-lm"><div class="gutter-track" id="gutter-lm-track"></div></div>
+  <div class="pane" id="pane-mid">
+    <div class="pane-scroll" id="scroll-mid"><div id="lines-mid"></div></div>
+  </div>
+  <div class="gutter" id="gutter-mr"><div class="gutter-track" id="gutter-mr-track"></div></div>
+  <div class="pane" id="pane-right">
+    <div class="pane-scroll" id="scroll-right"><div id="lines-right"></div></div>
+  </div>
+</div>
+
+<!-- ============ STATUS BAR ============ -->
+<div class="statusbar">
+  <div class="legend">
+    <span><span class="swatch mod"></span> Modified</span>
+    <span><span class="swatch add"></span> Added</span>
+    <span><span class="swatch del"></span> Deleted</span>
+  </div>
+  <div id="status-text">Ready</div>
+</div>
+
+<script>
+/* ======================================================================
+   Diff Tool
+   ====================================================================== */
+
+const LINE_H = 20; // px, must match CSS .line min-height
+
+/* ---------- State ---------- */
+
+const state = {
+  mode: '2way', // '2way' or '3way'
+  cols: {
+    left:  { text: '',  lines: [], history: [], future: [], userLoaded: false, fullPath: '', handle: null },
+    mid:   { text: '',   lines: [], history: [], future: [], userLoaded: false, fullPath: '', handle: null },
+    right: { text: '', lines: [], history: [], future: [], userLoaded: false, fullPath: '', handle: null },
+  },
+  // diff alignment rows: each row = {left:{type,lineIdx}|null, mid:.., right:..}
+  rows: [],
+  diffBlocks: [], // list of {start, end, types:{left,mid,right}} - groups of consecutive non-equal rows
+  currentDiffIndex: -1,
+};
+
+function splitLines(text){
+  if(text === '') return [''];
+  // 兼顧 Windows (\r\n) 與 Unix (\n) 的換行符號切割
+  return text.split(/\r?\n/);
+}
+
+/* ======================================================================
+   Diff algorithm: simple LCS-based line diff for two arrays
+   ====================================================================== */
+function diffLines(a, b) {
+  const n = a.length, m = b.length;
+  // LCS dp table
+  const dp = Array.from({length:n+1},()=>new Int32Array(m+1));
+  for(let i=n-1;i>=0;i--){
+    for(let j=m-1;j>=0;j--){
+      if(a[i]===b[j]) dp[i][j] = dp[i+1][j+1]+1;
+      else dp[i][j] = Math.max(dp[i+1][j], dp[i][j+1]);
+    }
+  }
+  // build alignment: array of {a:idx|null, b:idx|null, eq:bool}
+  const result = [];
+  let i=0,j=0;
+  while(i<n && j<m){
+    if(a[i]===b[j]){ result.push({a:i,b:j,eq:true}); i++; j++; }
+    else if(dp[i+1][j] >= dp[i][j+1]){ result.push({a:i,b:null,eq:false}); i++; }
+    else { result.push({a:null,b:j,eq:false}); j++; }
+  }
+  while(i<n){ result.push({a:i,b:null,eq:false}); i++; }
+  while(j<m){ result.push({a:null,b:j,eq:false}); j++; }
+
+  // Post-process: merge adjacent del+add pairs into "mod" pairs for nicer alignment
+  const merged = [];
+  for(let k=0;k<result.length;k++){
+    const cur = result[k];
+    if(!cur.eq && cur.a!==null && cur.b===null){
+      // look ahead for a run of adds that could pair
+      // find consecutive del block
+      let delStart=k;
+      while(k<result.length && !result[k].eq && result[k].a!==null && result[k].b===null) k++;
+      const delBlock = result.slice(delStart,k);
+      // consecutive add block right after
+      let addStart=k;
+      while(k<result.length && !result[k].eq && result[k].a===null && result[k].b!==null) k++;
+      const addBlock = result.slice(addStart,k);
+      k--; // adjust outer loop increment
+      const len = Math.max(delBlock.length, addBlock.length);
+      for(let x=0;x<len;x++){
+        const da = x<delBlock.length ? delBlock[x].a : null;
+        const bb = x<addBlock.length ? addBlock[x].b : null;
+        merged.push({a:da, b:bb, eq:false});
+      }
+    } else {
+      merged.push(cur);
+    }
+  }
+  return merged;
+}
+
+/* For 3-way: align left vs mid vs right using mid as the pivot/base.
+   We compute diff(left,mid) and diff(mid,right), then merge alignments
+   based on mid index. */
+function buildRows3(leftLines, midLines, rightLines){
+  const dLM = diffLines(leftLines, midLines); // {a:leftIdx, b:midIdx}
+  const dMR = diffLines(midLines, rightLines); // {a:midIdx, b:rightIdx}
+
+  // index dMR by mid index for quick lookup, also handle mid==null entries (pure right-adds)
+  // We'll walk through both alignments in lockstep keyed on "mid index progression"
+  const rows = [];
+  let p1=0, p2=0;
+  while(p1 < dLM.length || p2 < dMR.length){
+    const e1 = p1 < dLM.length ? dLM[p1] : null;
+    const e2 = p2 < dMR.length ? dMR[p2] : null;
+
+    const midA = e1 ? e1.b : null; // mid index per left-alignment
+    const midB = e2 ? e2.a : null; // mid index per right-alignment
+
+    if(e1 && midA===null && (e2===null || midB!==null)){
+      // left has a row with no mid counterpart (pure left line, deletion relative to mid)
+      rows.push({left:{idx:e1.a}, mid:null, right:null});
+      p1++;
+      continue;
+    }
+    if(e2 && midB===null && (e1===null || midA!==null)){
+      // right has a row with no mid counterpart (pure right addition)
+      rows.push({left:null, mid:null, right:{idx:e2.b}});
+      p2++;
+      continue;
+    }
+    if(e1 && e2 && midA!==null && midB!==null && midA===midB){
+      rows.push({
+        left: e1.a!==null ? {idx:e1.a} : null,
+        mid: {idx: midA},
+        right: e2.b!==null ? {idx:e2.b} : null
+      });
+      p1++; p2++;
+      continue;
+    }
+    // fallback / mismatch - advance whichever has null mid first
+    if(e1 && midA===null){ rows.push({left:{idx:e1.a}, mid:null, right:null}); p1++; continue; }
+    if(e2 && midB===null){ rows.push({left:null, mid:null, right:{idx:e2.b}}); p2++; continue; }
+    // both point to mid but mismatched indices - advance smaller
+    if(e1 && e2){
+      if(midA <= midB){ rows.push({left: e1.a!==null?{idx:e1.a}:null, mid:{idx:midA}, right:null}); p1++; }
+      else { rows.push({left:null, mid:{idx:midB}, right: e2.b!==null?{idx:e2.b}:null}); p2++; }
+      continue;
+    }
+    if(e1){ rows.push({left: e1.a!==null?{idx:e1.a}:null, mid: midA!==null?{idx:midA}:null, right:null}); p1++; continue; }
+    if(e2){ rows.push({left:null, mid: midB!==null?{idx:midB}:null, right: e2.b!==null?{idx:e2.b}:null}); p2++; continue; }
+    break;
+  }
+  return rows;
+}
+
+function buildRows2(leftLines, rightLines){
+  const d = diffLines(leftLines, rightLines);
+  return d.map(e=>({
+    left: e.a!==null ? {idx:e.a} : null,
+    mid: null,
+    right: e.b!==null ? {idx:e.b} : null
+  }));
+}
+
+/* Determine the "status" of a row for each column: 'equal','mod','add','del' */
+function classifyRow(row, mode){
+  const hasL = row.left!==null;
+  const hasM = row.mid!==null;
+  const hasR = row.right!==null;
+
+  if(mode==='3way'){
+    // If mid column is entirely absent (userLoaded=false / empty), treat as 2-way diff
+    // between left and right, mid shown as neutral empty
+    const midEmpty = !state.cols.mid.userLoaded || state.cols.mid.text.trim() === '';
+    if(midEmpty){
+      // classify only left vs right, mid stays neutral
+      if(hasL && hasR){
+        const lt = state.cols.left.lines[row.left.idx];
+        const rt = state.cols.right.lines[row.right.idx];
+        if(lt===rt) return {left:'equal', mid:'equal', right:'equal'};
+        return {left:'mod', mid:'equal', right:'mod', anyDiff:true};
+      }
+      if(hasL && !hasR) return {left:'del', mid:'equal', right:'del', anyDiff:true};
+      if(!hasL && hasR) return {left:'add', mid:'equal', right:'add', anyDiff:true};
+      return {left:'equal', mid:'equal', right:'equal'};
+    }
+
+    const presentCount = (hasL?1:0)+(hasM?1:0)+(hasR?1:0);
+    if(presentCount===3){
+      const lt = state.cols.left.lines[row.left.idx];
+      const mt = state.cols.mid.lines[row.mid.idx];
+      const rt = state.cols.right.lines[row.right.idx];
+      if(lt===mt && mt===rt) return {left:'equal',mid:'equal',right:'equal'};
+      return {left: lt===mt?'equal':'mod', mid:'equal', right: rt===mt?'equal':'mod', anyDiff:true};
+    }
+    // missing one or more columns
+    const res = {left:'equal',mid:'equal',right:'equal',anyDiff:true};
+    res.left = hasL ? 'mod' : 'del';
+    res.mid  = hasM ? 'mod' : 'del';
+    res.right= hasR ? 'mod' : 'del';
+    return res;
+  } else {
+    if(hasL && hasR){
+      const lt = state.cols.left.lines[row.left.idx];
+      const rt = state.cols.right.lines[row.right.idx];
+      if(lt===rt) return {left:'equal',right:'equal'};
+      return {left:'mod', right:'mod', anyDiff:true};
+    }
+    if(hasL && !hasR) return {left:'del', right:'del', anyDiff:true};
+    if(!hasL && hasR) return {left:'add', right:'add', anyDiff:true};
+    return {left:'equal',right:'equal'};
+  }
+}
+
+/* Build diff blocks: consecutive rows where anyDiff is true, grouped */
+function buildDiffBlocks(){
+  const blocks = [];
+  let cur = null;
+  for(let i=0;i<state.rows.length;i++){
+    const row = state.rows[i];
+    const cls = classifyRow(row, state.mode);
+    row._cls = cls;
+    if(cls.anyDiff){
+      if(!cur) cur = {start:i, end:i};
+      else cur.end = i;
+    } else {
+      if(cur){ blocks.push(cur); cur=null; }
+    }
+  }
+  if(cur) blocks.push(cur);
+  state.diffBlocks = blocks;
+}
+
+/* ======================================================================
+   Rendering
+   ====================================================================== */
+
+function recompute(){
+  state.cols.left.lines = splitLines(state.cols.left.text);
+  state.cols.mid.lines = splitLines(state.cols.mid.text);
+  state.cols.right.lines = splitLines(state.cols.right.text);
+
+  if(state.mode==='3way'){
+    const midEmpty = !state.cols.mid.userLoaded || state.cols.mid.text.trim() === '';
+    if(midEmpty){
+      // Use left<->right diff, but keep mid column null (shown as empty pane)
+      const rows2 = buildRows2(state.cols.left.lines, state.cols.right.lines);
+      state.rows = rows2; // mid is already null in each row from buildRows2
+    } else {
+      state.rows = buildRows3(state.cols.left.lines, state.cols.mid.lines, state.cols.right.lines);
+    }
+  } else {
+    state.rows = buildRows2(state.cols.left.lines, state.cols.right.lines);
+  }
+  buildDiffBlocks();
+  state.currentDiffIndex = state.diffBlocks.length ? 0 : -1;
+  render();
+  updateDiffCounter();
+}
+
+function escapeHtml(str){
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function lineHtml(text){
+  return escapeHtml(text);
+}
+
+/* Character-level LCS diff between two strings.
+   Returns array of {type:'eq'|'del'|'ins', text} segments.
+   'del' = chars only in a (left), 'ins' = chars only in b (right). */
+function diffChars(a, b){
+  const n = a.length, m = b.length;
+  if(n * m > 200000) return null; // too long, skip intra-line diff
+  const dp = Array.from({length:n+1}, ()=>new Int32Array(m+1));
+  for(let i=n-1;i>=0;i--){
+    for(let j=m-1;j>=0;j--){
+      dp[i][j] = a[i]===b[j] ? dp[i+1][j+1]+1 : Math.max(dp[i+1][j], dp[i][j+1]);
+    }
+  }
+  const segs = [];
+  let i=0, j=0;
+  while(i<n || j<m){
+    if(i<n && j<m && a[i]===b[j]){ segs.push({type:'eq',text:a[i]}); i++; j++; }
+    else if(j<m && (i>=n || dp[i][j+1] >= (i<n ? dp[i+1][j] : 0))){ segs.push({type:'ins',text:b[j]}); j++; }
+    else { segs.push({type:'del',text:a[i]}); i++; }
+  }
+  // merge consecutive same-type
+  const merged = [];
+  for(const s of segs){
+    if(merged.length && merged[merged.length-1].type===s.type) merged[merged.length-1].text+=s.text;
+    else merged.push({type:s.type, text:s.text});
+  }
+  return merged;
+}
+
+/* Produce HTML for a 'mod' line, highlighting intra-line differences.
+   side='del': this is the left/old text; highlight deleted chars.
+   side='ins': this is the right/new text; highlight inserted chars. */
+function lineHtmlWithDiff(text, otherText, side){
+  const segs = diffChars(side==='del' ? text : otherText,
+                          side==='del' ? otherText : text);
+  if(!segs) return escapeHtml(text);
+  let html = '';
+  for(const s of segs){
+    const esc = escapeHtml(s.text);
+    if(s.type==='eq'){ html += esc; }
+    else if(s.type===(side==='del' ? 'del' : 'ins')){ html += `<span class="char-diff">${esc}</span>`; }
+    // skip chars belonging to the other side
+  }
+  return html;
+}
+
+function buildActionButtons(rowIdx, col, hasLeftPane, hasRightPane){
+  // col: 'left' | 'mid' | 'right'
+  let html = '<div class="actions">';
+  if(hasRightPane){
+    html += `<button class="actbtn" data-action="copy-right" data-row="${rowIdx}" data-col="${col}" title="Merge to right">➡️</button>`;
+  }
+  if(hasLeftPane){
+    html += `<button class="actbtn" data-action="copy-left" data-row="${rowIdx}" data-col="${col}" title="Merge to left">⬅️</button>`;
+  }
+  html += `<button class="actbtn" data-action="delete-block" data-row="${rowIdx}" data-col="${col}" title="Delete this diff block">❌</button>`;
+  html += '</div>';
+  return html;
+}
+
+function render(){
+  const mode = state.mode;
+  document.getElementById('pane-mid').classList.toggle('hidden', mode!=='3way');
+  document.getElementById('pathcol-mid').classList.toggle('hidden', mode!=='3way');
+  document.getElementById('gutter-lm').classList.toggle('hidden', false);
+  document.getElementById('gutter-mr').classList.toggle('hidden', mode!=='3way');
+  // when 2way, gutter-lm acts as the single left<->right gutter
+  document.getElementById('gutter-lm-track').dataset.pair = mode==='3way' ? 'lm' : 'lr';
+
+  renderColumn('left');
+  if(mode==='3way') renderColumn('mid');
+  renderColumn('right');
+  renderGutters();
+}
+
+function renderColumn(col){
+  const container = document.getElementById('lines-' + col);
+  const colData = state.cols[col];
+  const mode = state.mode;
+  let html = '';
+  const hasLeftPane = (col!=='left'); // is there a pane to the left of this one
+  const hasRightPane = (col!=='right'); // is there a pane to the right of this one
+
+  for(let i=0;i<state.rows.length;i++){
+    const row = state.rows[i];
+    const cell = row[col];
+    const cls = row._cls;
+    const status = cls ? cls[col] : 'equal';
+
+    let lineClasses = 'line';
+    let lineNum = '';
+    let content = '';
+    let editable = 'false';
+    let actionsHtml = '';
+
+    if(cell){
+      lineNum = (cell.idx+1).toString();
+      editable = 'true';
+      if(status==='mod'){
+        lineClasses += ' diff-mod';
+        // find the paired column for intra-line char diff
+        let otherCol = null;
+        if(col==='left') otherCol = mode==='3way' ? 'mid' : 'right';
+        else if(col==='right') otherCol = mode==='3way' ? 'mid' : 'left';
+        else if(col==='mid') otherCol = 'right'; // mid vs right as reference
+        const otherCell = otherCol ? row[otherCol] : null;
+        if(otherCell && state.cols[otherCol].lines[otherCell.idx] !== undefined){
+          const otherText = state.cols[otherCol].lines[otherCell.idx];
+          const side = (col==='left' || (col==='mid' && otherCol==='right')) ? 'del' : 'ins';
+          content = lineHtmlWithDiff(colData.lines[cell.idx], otherText, side);
+        } else {
+          content = lineHtml(colData.lines[cell.idx]);
+        }
+      } else {
+        content = lineHtml(colData.lines[cell.idx]);
+        if(status==='add') lineClasses += ' diff-add';
+        else if(status==='del') lineClasses += ' diff-del';
+      }
+    } else {
+      lineClasses += ' empty';
+      if(status==='add') lineClasses += ' diff-add';
+      else if(status==='del') lineClasses += ' diff-del';
+      else if(status==='mod') lineClasses += ' diff-mod';
+    }
+
+    if(i===state.diffBlocks[state.currentDiffIndex]?.start){
+      lineClasses += ' diff-current';
+    }
+
+    if(cls && cls.anyDiff){
+      actionsHtml = buildActionButtons(i, col, hasLeftPane, hasRightPane);
+    }
+
+    html += `<div class="${lineClasses}" data-row="${i}" data-col="${col}">`
+          + `<div class="num">${lineNum}</div>`
+          + `<div class="content" contenteditable="${editable}" spellcheck="false" data-row="${i}" data-col="${col}">${content}</div>`
+          + actionsHtml
+          + `</div>`;
+  }
+  container.innerHTML = html;
+}
+
+/* Render the gutter markers between panes, showing whole-file diff overview */
+function renderGutters(){
+  const totalRows = state.rows.length;
+  const scrollHeight = Math.max(totalRows * LINE_H, 1);
+
+  renderOneGutter('gutter-lm-track', 'left', state.mode==='3way' ? 'mid' : 'right', scrollHeight);
+  if(state.mode==='3way'){
+    renderOneGutter('gutter-mr-track', 'mid', 'right', scrollHeight);
+  }
+}
+
+function renderOneGutter(trackId, colA, colB, scrollHeight){
+  const track = document.getElementById(trackId);
+  track.style.height = scrollHeight + 'px';
+  let html = '';
+  for(const block of state.diffBlocks){
+    const top = block.start * LINE_H;
+    const height = (block.end - block.start + 1) * LINE_H;
+    // determine marker type based on colA/colB statuses within block
+    let type = 'mod';
+    for(let i=block.start;i<=block.end;i++){
+      const cls = state.rows[i]._cls;
+      const sA = cls[colA], sB = cls[colB];
+      if(sA==='del' || sB==='add'){ type='del'; break; }
+      if(sA==='add' || sB==='del'){ type='add'; break; }
+      if(sA==='mod' || sB==='mod'){ type='mod'; }
+    }
+    html += `<div class="marker ${type}" style="top:${top}px;height:${height}px" data-block-start="${block.start}" title="跳到此差異"></div>`;
+  }
+  track.innerHTML = html;
+}
+
+/* ======================================================================
+   Navigation
+   ====================================================================== */
+
+function updateDiffCounter(){
+  const total = state.diffBlocks.length;
+  const cur = total ? state.currentDiffIndex + 1 : 0;
+  document.getElementById('diff-counter').textContent = `Diff: ${cur} / ${total}`;
+}
+
+function scrollToRow(rowIdx){
+  const targetTop = rowIdx * LINE_H;
+  const scrollers = state.mode==='3way'
+    ? ['scroll-left','scroll-mid','scroll-right']
+    : ['scroll-left','scroll-right'];
+  for(const id of scrollers){
+    const el = document.getElementById(id);
+    const center = targetTop - el.clientHeight/2 + LINE_H/2;
+    el.scrollTop = Math.max(0, center);
+  }
+}
+
+function goToDiff(target){
+  const n = state.diffBlocks.length;
+  if(n===0) return;
+  if(target==='first') state.currentDiffIndex = 0;
+  else if(target==='last') state.currentDiffIndex = n-1;
+  else if(target==='next') state.currentDiffIndex = Math.min(n-1, state.currentDiffIndex+1);
+  else if(target==='prev') state.currentDiffIndex = Math.max(0, state.currentDiffIndex-1);
+
+  const block = state.diffBlocks[state.currentDiffIndex];
+  render();
+  scrollToRow(block.start);
+  updateDiffCounter();
+  setStatus(`Jumped to diff ${state.currentDiffIndex+1} / ${n}`);
+}
+
+/* ======================================================================
+   Merge / Delete actions
+   ====================================================================== */
+
+function findBlockForRow(rowIdx){
+  for(const b of state.diffBlocks){
+    if(rowIdx>=b.start && rowIdx<=b.end) return b;
+  }
+  return {start:rowIdx, end:rowIdx};
+}
+
+function pushHistory(col){
+  const c = state.cols[col];
+  c.history.push(c.text);
+  if(c.history.length>200) c.history.shift();
+  c.future = [];
+}
+
+/* Get the text-lines for a block range for a given column, as an array of strings
+   (skipping null cells). */
+function getBlockLines(block, col){
+  const lines = [];
+  for(let i=block.start;i<=block.end;i++){
+    const cell = state.rows[i][col];
+    if(cell) lines.push(state.cols[col].lines[cell.idx]);
+  }
+  return lines;
+}
+
+/* Replace the destination column's text region corresponding to the block
+   with the source column's lines for that block. */
+function mergeBlock(rowIdx, fromCol, toCol){
+  const block = findBlockForRow(rowIdx);
+  const srcLines = getBlockLines(block, fromCol);
+
+  // Determine destination splice range in toCol.lines:
+  // find the first and last non-null cell index in toCol within the block
+  let firstIdx=null, lastIdx=null;
+  for(let i=block.start;i<=block.end;i++){
+    const cell = state.rows[i][toCol];
+    if(cell){
+      if(firstIdx===null) firstIdx=cell.idx;
+      lastIdx=cell.idx;
+    }
+  }
+
+  const destLines = state.cols[toCol].lines.slice();
+  if(firstIdx===null){
+    // destination has no lines in this block (pure insertion) -> need to find insertion point
+    // find nearest preceding row that has a cell in toCol
+    let insertAt = destLines.length;
+    for(let i=block.start-1;i>=0;i--){
+      const cell = state.rows[i][toCol];
+      if(cell){ insertAt = cell.idx+1; break; }
+    }
+    if(block.start===0) insertAt = 0;
+    destLines.splice(insertAt, 0, ...srcLines);
+  } else {
+    destLines.splice(firstIdx, lastIdx-firstIdx+1, ...srcLines);
+  }
+
+  pushHistory(toCol);
+  state.cols[toCol].text = destLines.join('\n');
+  recompute();
+  setStatus(`Merged ${colLabel(fromCol)} → ${colLabel(toCol)}`);
+}
+
+/* Delete the diff block only from the clicked column (col argument).
+   Lines belonging to that block in that column are removed; other columns untouched. */
+function deleteBlock(rowIdx, col){
+  const block = findBlockForRow(rowIdx);
+  let firstIdx=null, lastIdx=null;
+  for(let i=block.start;i<=block.end;i++){
+    const cell = state.rows[i][col];
+    if(cell){
+      if(firstIdx===null) firstIdx=cell.idx;
+      lastIdx=cell.idx;
+    }
+  }
+  if(firstIdx!==null){
+    const destLines = state.cols[col].lines.slice();
+    destLines.splice(firstIdx, lastIdx-firstIdx+1);
+    pushHistory(col);
+    state.cols[col].text = destLines.join('\n');
+  }
+  recompute();
+  setStatus(`Deleted diff block from ${colLabel(col)}`);
+}
+
+/* ======================================================================
+   Editing: sync contenteditable back into state.cols[col].text
+   ====================================================================== */
+
+function commitColumnEdits(col){
+  const container = document.getElementById('lines-'+col);
+  // 只選取真正有對應到原始檔案行（有在對應結構內）的非 empty 元素進行文字收集
+  const lineEls = container.querySelectorAll('.line:not(.empty) .content[contenteditable="true"]');
+  const newLines = [];
+  lineEls.forEach(el=>{ 
+    // 使用 textContent 讀取，並置換掉可能隱含的 \r 或影響版面的特殊字元
+    newLines.push(el.textContent.replace(/\r/g, '')); 
+  });
+  
+  pushHistory(col);
+  state.cols[col].text = newLines.join('\n');
+}
+
+let editDebounce = null;
+function onContentInput(e){
+  const col = e.target.dataset.col;
+  if(editDebounce) clearTimeout(editDebounce);
+  editDebounce = setTimeout(()=>{
+    commitColumnEdits(col);
+    recompute();
+  }, 600);
+}
+
+/* ======================================================================
+   Undo / Redo
+   ====================================================================== */
+
+function undo(col){
+  const c = state.cols[col];
+  if(c.history.length===0) { setStatus(`${colLabel(col)}: nothing to undo`); return; }
+  c.future.push(c.text);
+  c.text = c.history.pop();
+  recompute();
+  setStatus(`Undone — ${colLabel(col)}`);
+}
+function redo(col){
+  const c = state.cols[col];
+  if(c.future.length===0) { setStatus(`${colLabel(col)}: nothing to redo`); return; }
+  c.history.push(c.text);
+  c.text = c.future.pop();
+  recompute();
+  setStatus(`Redone — ${colLabel(col)}`);
+}
+function colLabel(col){ return col==='left'?'Left':col==='mid'?'Middle':'Right'; }
+
+/* ======================================================================
+   File Open / Save / Refresh
+   ====================================================================== */
+
+let fileInputTargetCol = null;
+
+// Sync the path input display from state
+function syncPathInput(col){
+  const inputId = col === 'mid' ? 'path-mid' : 'path-' + col;
+  const el = document.getElementById(inputId);
+  if(el) el.value = state.cols[col].fullPath;
+}
+
+async function openFile(col){
+  // Prefer the File System Access API: it gives us a reusable file handle so
+  // the Refresh button can later re-read the file straight from disk.
+  if(window.showOpenFilePicker){
+    try{
+      const [handle] = await window.showOpenFilePicker({ multiple:false });
+      const file = await handle.getFile();
+      const text = await file.text();
+      pushHistory(col);
+      state.cols[col].text = text;
+      state.cols[col].fullPath = file.name;
+      state.cols[col].userLoaded = true;
+      state.cols[col].handle = handle;
+      syncPathInput(col);
+      recompute();
+      setStatus(`Opened ${colLabel(col)}: ${file.name}`);
+    }catch(err){
+      if(err && err.name === 'AbortError') return; // user cancelled the picker
+      // Some environments reject showOpenFilePicker (e.g. permissions policy);
+      // fall back to the classic file input.
+      fileInputTargetCol = col;
+      document.getElementById('file-input').click();
+    }
+    return;
+  }
+  fileInputTargetCol = col;
+  document.getElementById('file-input').click();
+}
+
+document.getElementById('file-input').addEventListener('change', (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    const col = fileInputTargetCol;
+    pushHistory(col);
+    state.cols[col].text = reader.result;
+    // Store full path: use webkitRelativePath if available, else just name
+    const fullPath = file.webkitRelativePath || file.name;
+    state.cols[col].fullPath = fullPath;
+    state.cols[col].userLoaded = true;
+    state.cols[col].handle = null; // classic <input type=file> cannot yield a re-readable handle
+    syncPathInput(col);
+    recompute();
+    setStatus(`Opened ${colLabel(col)}: ${fullPath}`);
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
+// Press Enter in a path input: re-open the file picker for that col
+// (Browsers cannot read arbitrary local paths directly for security reasons,
+//  so we trigger the file picker pre-filled; the user just confirms the file.)
+document.querySelectorAll('.pathrow input[type=text]').forEach(input => {
+  input.addEventListener('keydown', (e) => {
+    if(e.key !== 'Enter') return;
+    e.preventDefault();
+    const col = input.id === 'path-left' ? 'left'
+               : input.id === 'path-mid'  ? 'mid'
+               : 'right';
+    // Update the stored fullPath from what the user typed
+    state.cols[col].fullPath = input.value.trim();
+    // Trigger file picker so user can select the file
+    openFile(col);
+    setStatus(`Select the file to load into ${colLabel(col)} pane…`);
+  });
+});
+
+function saveFile(col){
+  const text = state.cols[col].text;
+  const filename = state.cols[col].fullPath || (col+'.txt');
+  const blob = new Blob([text], {type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename.split(/[\\/]/).pop(); // use only filename part for download
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  setStatus(`Saved ${colLabel(col)}: ${filename}`);
+}
+
+async function refreshFile(col){
+  const c = state.cols[col];
+  const handle = c.handle;
+
+  if(!handle){
+    // No re-readable handle (e.g. file was loaded via the classic file
+    // picker, or never loaded at all) — browsers don't allow re-reading an
+    // arbitrary path for security reasons, so ask the user to pick the file
+    // again, same as pressing Enter in the path field.
+    if(!c.userLoaded){
+      setStatus(`${colLabel(col)}: nothing to refresh — open a file first`);
+      return;
+    }
+    setStatus(`${colLabel(col)}: can't auto-refresh this file — please reselect it`);
+    openFile(col);
+    return;
+  }
+
+  try{
+    // Re-confirm read permission in case it was revoked since the file was opened.
+    if(handle.queryPermission){
+      let perm = await handle.queryPermission({ mode:'read' });
+      if(perm !== 'granted'){
+        perm = await handle.requestPermission({ mode:'read' });
+        if(perm !== 'granted'){
+          setStatus(`${colLabel(col)}: permission denied — can't refresh`);
+          return;
+        }
+      }
+    }
+    const file = await handle.getFile();
+    const text = await file.text();
+    if(text === c.text){
+      setStatus(`${colLabel(col)}: no changes on disk`);
+      return;
+    }
+    pushHistory(col);
+    c.text = text;
+    recompute();
+    setStatus(`Refreshed ${colLabel(col)} from disk: ${file.name}`);
+  }catch(err){
+    setStatus(`${colLabel(col)}: refresh failed — file may have been moved or deleted`);
+  }
+}
+
+/* ======================================================================
+   Status bar helper
+   ====================================================================== */
+function setStatus(msg){
+  document.getElementById('status-text').textContent = msg;
+}
+
+/* ======================================================================
+   Scroll sync between panes
+   ====================================================================== */
+let syncingScroll = false;
+function setupScrollSync(){
+  const ids = ['scroll-left','scroll-mid','scroll-right'];
+  ids.forEach(id=>{
+    document.getElementById(id).addEventListener('scroll', (e)=>{
+      if(syncingScroll) return;
+      syncingScroll = true;
+      const top = e.target.scrollTop;
+      ids.forEach(other=>{
+        if(other!==id){
+          const el = document.getElementById(other);
+          if(!el.closest('.pane').classList.contains('hidden')) el.scrollTop = top;
+        }
+      });
+      syncingScroll = false;
+      updateGutterScrollOffset();
+    });
+  });
+}
+
+function updateGutterScrollOffset(){
+  const top = document.getElementById('scroll-left').scrollTop;
+  document.getElementById('gutter-lm-track').style.transform = `translateY(${-top}px)`;
+  document.getElementById('gutter-mr-track').style.transform = `translateY(${-top}px)`;
+}
+
+/* ======================================================================
+   Event wiring
+   ====================================================================== */
+
+document.getElementById('btn-2way').addEventListener('click', ()=>{
+  state.mode='2way';
+  document.getElementById('btn-2way').classList.add('active');
+  document.getElementById('btn-3way').classList.remove('active');
+  recompute();
+  setStatus('Switched to 2-way compare');
+});
+document.getElementById('btn-3way').addEventListener('click', ()=>{
+  // When switching from 2-way to 3-way:
+  // Keep left and right exactly as they are.
+  // Mid stays as-is (empty or previously loaded). Do NOT move right->mid.
+  state.mode='3way';
+  document.getElementById('btn-3way').classList.add('active');
+  document.getElementById('btn-2way').classList.remove('active');
+  recompute();
+  setStatus('Switched to 3-way compare');
+});
+
+document.getElementById('nav-first').addEventListener('click', ()=>goToDiff('first'));
+document.getElementById('nav-prev').addEventListener('click', ()=>goToDiff('prev'));
+document.getElementById('nav-next').addEventListener('click', ()=>goToDiff('next'));
+document.getElementById('nav-last').addEventListener('click', ()=>goToDiff('last'));
+document.getElementById('btn-recompute').addEventListener('click', async () => {
+  setStatus('Reloading files and recomputing diff...');
+  
+  // 依序重新讀取有載入過檔案的欄位
+  if (state.cols.left.userLoaded)  await refreshFile('left');
+  if (state.mode === '3way' && state.cols.mid.userLoaded)   await refreshFile('mid');
+  if (state.cols.right.userLoaded) await refreshFile('right');
+  
+  // refreshFile 內部成功時會自動呼叫 recompute()，
+  // 這裡強制再呼叫一次以確保即使檔案沒變也重新整理畫面與計算
+  recompute();
+  setStatus('All files reloaded and diff recomputed');
+});
+
+/* Path bar buttons */
+document.querySelectorAll('.pathrow .filebtns .tbtn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const act = btn.dataset.act;
+    const col = btn.dataset.col;
+    if(act==='undo') undo(col);
+    else if(act==='redo') redo(col);
+    else if(act==='refresh') refreshFile(col);
+    else if(act==='open') openFile(col);
+    else if(act==='save') saveFile(col);
+  });
+});
+
+/* Delegate clicks on action buttons (hover icons) and content edits */
+document.getElementById('editor-wrap').addEventListener('click', (e)=>{
+  const actBtn = e.target.closest('.actbtn');
+  if(actBtn){
+    const action = actBtn.dataset.action;
+    const row = parseInt(actBtn.dataset.row,10);
+    const col = actBtn.dataset.col;
+    if(action==='copy-right'){
+      const toCol = state.mode==='3way'
+        ? (col==='left' ? 'mid' : 'right')
+        : 'right';
+      mergeBlock(row, col, toCol);
+    } else if(action==='copy-left'){
+      const toCol = state.mode==='3way'
+        ? (col==='right' ? 'mid' : 'left')
+        : 'left';
+      mergeBlock(row, col, toCol);
+    } else if(action==='delete-block'){
+      deleteBlock(row, col);
+    }
+  }
+});
+
+document.getElementById('editor-wrap').addEventListener('input', (e)=>{
+  if(e.target.classList.contains('content') && e.target.isContentEditable){
+    onContentInput(e);
+  }
+});
+
+/* Click on gutter marker -> jump to that block */
+function setupGutterClicks(){
+  ['gutter-lm-track','gutter-mr-track'].forEach(trackId=>{
+    document.getElementById(trackId).addEventListener('click', (e)=>{
+      const marker = e.target.closest('.marker');
+      if(!marker) return;
+      const startRow = parseInt(marker.dataset.blockStart,10);
+      // find which diff block index this corresponds to
+      const idx = state.diffBlocks.findIndex(b=>b.start===startRow);
+      if(idx>=0){
+        state.currentDiffIndex = idx;
+        render();
+        scrollToRow(startRow);
+        updateDiffCounter();
+        setStatus(`Jumped to diff ${idx+1} / ${state.diffBlocks.length}`);
+      }
+    });
+  });
+}
+
+/* Keyboard shortcuts: Ctrl+Z / Ctrl+Y while focused inside a pane */
+document.addEventListener('keydown', (e)=>{
+  if(!(e.ctrlKey || e.metaKey)) return;
+  const active = document.activeElement;
+  const colEl = active && active.closest('.pane');
+  if(!colEl) return;
+  let col = null;
+  if(colEl.id==='pane-left') col='left';
+  else if(colEl.id==='pane-mid') col='mid';
+  else if(colEl.id==='pane-right') col='right';
+  if(!col) return;
+  if(e.key==='z' || e.key==='Z'){
+    e.preventDefault();
+    if(e.shiftKey) redo(col); else undo(col);
+  } else if(e.key==='y' || e.key==='Y'){
+    e.preventDefault();
+    redo(col);
+  }
+});
+
+/* ======================================================================
+   Init
+   ====================================================================== */
+// Sync path inputs from initial state
+syncPathInput('left');
+syncPathInput('mid');
+syncPathInput('right');
+setupScrollSync();
+setupGutterClicks();
+recompute();
+setStatus('Ready');
+</script>
+</body>
+</html>
