@@ -526,6 +526,8 @@ function recompute(){
   state.currentDiffIndex = state.diffBlocks.length ? 0 : -1;
   render();
   updateDiffCounter();
+  // 若有差異，預設畫面顯示第一個差異處
+  if(state.diffBlocks.length) scrollToRow(state.diffBlocks[0].start);
 }
 
 function escapeHtml(str){
