@@ -66,6 +66,11 @@
     flex:1;background:#f8f9fb;border:1px solid var(--border);color:var(--text);
     padding:4px 6px;border-radius:3px;font-size:12px;min-width:0;
   }
+  /* 唯讀路徑列樣式：改為灰色底色 */
+  .pathrow input[type=text][readonly]{
+    background:#e1e3e6;
+    cursor:text;
+  }
   .pathrow .filebtns{display:flex;gap:2px;flex-shrink:0;}
   .pathrow .filebtns .tbtn{padding:4px 7px;}
 
@@ -218,7 +223,7 @@
 <div class="pathbar" id="pathbar">
   <div class="pathrow">
     <div class="col-label">
-      <input type="text" id="path-left" placeholder="Left file path...">
+      <input type="text" id="path-left" placeholder="Left file path..." readonly>
       <div class="filebtns">
         <button class="tbtn" data-act="undo" data-col="left" title="Undo">↩️</button>
         <button class="tbtn" data-act="redo" data-col="left" title="Redo">↪️</button>
@@ -228,7 +233,7 @@
       </div>
     </div>
     <div class="col-label" id="pathcol-mid">
-      <input type="text" id="path-mid" placeholder="Middle file path...">
+      <input type="text" id="path-mid" placeholder="Middle file path..." readonly>
       <div class="filebtns">
         <button class="tbtn" data-act="undo" data-col="mid" title="Undo">↩️</button>
         <button class="tbtn" data-act="redo" data-col="mid" title="Redo">↪️</button>
@@ -238,7 +243,7 @@
       </div>
     </div>
     <div class="col-label">
-      <input type="text" id="path-right" placeholder="Right file path...">
+      <input type="text" id="path-right" placeholder="Right file path..." readonly>
       <div class="filebtns">
         <button class="tbtn" data-act="undo" data-col="right" title="Undo">↩️</button>
         <button class="tbtn" data-act="redo" data-col="right" title="Redo">↪️</button>
@@ -934,24 +939,6 @@ document.getElementById('file-input').addEventListener('change', (e)=>{
   };
   reader.readAsText(file);
   e.target.value = '';
-});
-
-// Press Enter in a path input: re-open the file picker for that col
-// (Browsers cannot read arbitrary local paths directly for security reasons,
-//  so we trigger the file picker pre-filled; the user just confirms the file.)
-document.querySelectorAll('.pathrow input[type=text]').forEach(input => {
-  input.addEventListener('keydown', (e) => {
-    if(e.key !== 'Enter') return;
-    e.preventDefault();
-    const col = input.id === 'path-left' ? 'left'
-               : input.id === 'path-mid'  ? 'mid'
-               : 'right';
-    // Update the stored fullPath from what the user typed
-    state.cols[col].fullPath = input.value.trim();
-    // Trigger file picker so user can select the file
-    openFile(col);
-    setStatus(`Select the file to load into ${colLabel(col)} pane…`);
-  });
 });
 
 function saveFile(col){
