@@ -128,19 +128,26 @@
   }
   .actbtn:hover{background:var(--accent);}
 
-  /* Gutter (between panes) showing overview diff markers */
+  /* Gutter (between panes) showing overview diff markers - fixed minimap */
   .gutter{
     width:30px;flex-shrink:0;background:var(--gutter-bg);border-left:1px solid var(--border);border-right:1px solid var(--border);
-    position:relative;overflow:hidden;
+    position:relative;overflow:hidden;cursor:pointer;
   }
-  .gutter-track{position:absolute;left:0;top:0;width:100%;}
+  /* gutter-track now fills the gutter exactly (no scroll transform) */
+  .gutter-track{position:absolute;left:0;top:0;width:100%;height:100%;}
   .gutter .marker{
-    position:absolute;left:4px;right:4px;border-radius:2px;cursor:pointer;opacity:.85;
+    position:absolute;left:4px;right:4px;border-radius:2px;cursor:pointer;opacity:.85;min-height:2px;
   }
   .gutter .marker.mod{background:var(--diff-mod-border);}
   .gutter .marker.add{background:var(--diff-add-border);}
   .gutter .marker.del{background:var(--diff-del-border);}
   .gutter .marker:hover{opacity:1;outline:1px solid #333;}
+  /* viewport indicator */
+  .gutter .viewport-indicator{
+    position:absolute;left:0;right:0;background:rgba(37,112,194,0.12);
+    border-top:1px solid rgba(37,112,194,0.4);border-bottom:1px solid rgba(37,112,194,0.4);
+    pointer-events:none;
+  }
 
   /* status bar */
   .statusbar{
@@ -672,22 +679,29 @@ function renderColumn(col){
 
 /* Render the gutter markers between panes, showing whole-file diff overview */
 function renderGutters(){
-  const totalRows = state.rows.length;
-  const scrollHeight = Math.max(totalRows * LINE_H, 1);
-
-  renderOneGutter('gutter-lm-track', 'left', state.mode==='3way' ? 'mid' : 'right', scrollHeight);
+  renderOneGutter('gutter-lm-track', 'left', state.mode==='3way' ? 'mid' : 'right');
   if(state.mode==='3way'){
-    renderOneGutter('gutter-mr-track', 'mid', 'right', scrollHeight);
+    renderOneGutter('gutter-mr-track', 'mid', 'right');
   }
+  updateGutterViewport();
 }
 
-function renderOneGutter(trackId, colA, colB, scrollHeight){
+function renderOneGutter(trackId, colA, colB){
   const track = document.getElementById(trackId);
-  track.style.height = scrollHeight + 'px';
+  const totalRows = state.rows.length;
+  const totalFileH = Math.max(totalRows * LINE_H, 1);
+  // gutterH will be measured at paint time; use offsetHeight of gutter element
+  const gutterEl = track.parentElement;
+  const gutterH = gutterEl.offsetHeight || 400;
+
   let html = '';
   for(const block of state.diffBlocks){
-    const top = block.start * LINE_H;
-    const height = (block.end - block.start + 1) * LINE_H;
+    // Map file row position -> gutter pixel (proportional)
+    const topRatio    = (block.start * LINE_H) / totalFileH;
+    const bottomRatio = ((block.end + 1) * LINE_H) / totalFileH;
+    const top    = topRatio * gutterH;
+    const height = Math.max(2, (bottomRatio - topRatio) * gutterH);
+
     // determine marker type based on colA/colB statuses within block
     let type = 'mod';
     for(let i=block.start;i<=block.end;i++){
@@ -697,9 +711,31 @@ function renderOneGutter(trackId, colA, colB, scrollHeight){
       if(sA==='add' || sB==='del'){ type='add'; break; }
       if(sA==='mod' || sB==='mod'){ type='mod'; }
     }
-    html += `<div class="marker ${type}" style="top:${top}px;height:${height}px" data-block-start="${block.start}" title="跳到此差異"></div>`;
+    html += `<div class="marker ${type}" style="top:${top.toFixed(1)}px;height:${height.toFixed(1)}px" data-block-start="${block.start}" title="跳到此差異"></div>`;
   }
+  // viewport indicator placeholder (updated by updateGutterViewport)
+  html += `<div class="viewport-indicator" id="${trackId}-vp"></div>`;
   track.innerHTML = html;
+}
+
+/* Update the viewport indicator rectangle on all visible gutters */
+function updateGutterViewport(){
+  const scrollEl = document.getElementById('scroll-left');
+  const totalRows = state.rows.length;
+  const totalFileH = Math.max(totalRows * LINE_H, 1);
+  const scrollTop  = scrollEl.scrollTop;
+  const viewH      = scrollEl.clientHeight;
+
+  ['gutter-lm-track','gutter-mr-track'].forEach(trackId=>{
+    const vp = document.getElementById(trackId+'-vp');
+    if(!vp) return;
+    const gutterEl = document.getElementById(trackId).parentElement;
+    const gutterH  = gutterEl.offsetHeight || 400;
+    const top    = (scrollTop / totalFileH) * gutterH;
+    const height = Math.max(4, (viewH / totalFileH) * gutterH);
+    vp.style.top    = top.toFixed(1) + 'px';
+    vp.style.height = height.toFixed(1) + 'px';
+  });
 }
 
 /* ======================================================================
@@ -1113,16 +1149,12 @@ function setupScrollSync(){
         }
       });
       syncingScroll = false;
-      updateGutterScrollOffset();
+      updateGutterViewport();
     });
   });
 }
 
-function updateGutterScrollOffset(){
-  const top = document.getElementById('scroll-left').scrollTop;
-  document.getElementById('gutter-lm-track').style.transform = `translateY(${-top}px)`;
-  document.getElementById('gutter-mr-track').style.transform = `translateY(${-top}px)`;
-}
+
 
 /* ======================================================================
    Event wiring
@@ -1206,22 +1238,61 @@ document.getElementById('editor-wrap').addEventListener('input', (e)=>{
   }
 });
 
-/* Click on gutter marker -> jump to that block */
+/* Click on gutter -> jump to proportional file position
+   If click lands on a marker, jump to that diff block;
+   otherwise jump to the proportional row in the file. */
 function setupGutterClicks(){
-  ['gutter-lm-track','gutter-mr-track'].forEach(trackId=>{
-    document.getElementById(trackId).addEventListener('click', (e)=>{
+  ['gutter-lm','gutter-mr'].forEach(gutterId=>{
+    const gutterEl = document.getElementById(gutterId);
+    if(!gutterEl) return;
+    gutterEl.addEventListener('click', (e)=>{
+      const gutterH = gutterEl.offsetHeight;
+      const totalRows = state.rows.length;
+      if(!gutterH || !totalRows) return;
+
+      // y position relative to gutter top
+      const rect = gutterEl.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      const ratio = Math.max(0, Math.min(1, y / gutterH));
+
+      // Check if a marker was clicked -> jump to that diff block
       const marker = e.target.closest('.marker');
-      if(!marker) return;
-      const startRow = parseInt(marker.dataset.blockStart,10);
-      // find which diff block index this corresponds to
-      const idx = state.diffBlocks.findIndex(b=>b.start===startRow);
-      if(idx>=0){
-        state.currentDiffIndex = idx;
-        render();
-        scrollToRow(startRow);
-        updateDiffCounter();
-        setStatus(`Jumped to diff ${idx+1} / ${state.diffBlocks.length}`);
+      if(marker){
+        const startRow = parseInt(marker.dataset.blockStart, 10);
+        const idx = state.diffBlocks.findIndex(b=>b.start===startRow);
+        if(idx>=0){
+          state.currentDiffIndex = idx;
+          render();
+          scrollToRow(startRow);
+          updateDiffCounter();
+          setStatus(`Jumped to diff ${idx+1} / ${state.diffBlocks.length}`);
+          return;
+        }
       }
+
+      // Otherwise jump to proportional row
+      const targetRow = Math.floor(ratio * totalRows);
+      // Find nearest diff block to highlight
+      let nearestIdx = -1;
+      let nearestDist = Infinity;
+      state.diffBlocks.forEach((b, i)=>{
+        const dist = Math.min(Math.abs(b.start - targetRow), Math.abs(b.end - targetRow));
+        if(dist < nearestDist){ nearestDist = dist; nearestIdx = i; }
+      });
+      if(nearestIdx >= 0) state.currentDiffIndex = nearestIdx;
+
+      // Scroll all panes to proportional position
+      const totalFileH = totalRows * LINE_H;
+      const scrollEl = document.getElementById('scroll-left');
+      const newScrollTop = Math.max(0, ratio * totalFileH - scrollEl.clientHeight / 2);
+      const ids = state.mode==='3way'
+        ? ['scroll-left','scroll-mid','scroll-right']
+        : ['scroll-left','scroll-right'];
+      ids.forEach(id=>{ document.getElementById(id).scrollTop = newScrollTop; });
+      updateGutterViewport();
+      render();
+      updateDiffCounter();
+      setStatus(`Jumped to ${Math.round(ratio*100)}% of file`);
     });
   });
 }
@@ -1258,6 +1329,11 @@ setupGutterClicks();
 setupAllDropZones();
 recompute();
 setStatus('Ready');
+
+// Re-render gutters when window is resized (gutter height changes)
+window.addEventListener('resize', ()=>{
+  renderGutters();
+});
 </script>
 </body>
 </html>
