@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Toolbox</title>
+    <style>
+        :root {
+            --bg-color: #f5f7fb;
+            --card-bg: #ffffff;
+            --text-primary: #333333;
+            --text-secondary: #666666;
+            --border-color: #e1e4e8;
+            --primary-color: #4a90e2;
+            --shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            --shadow-hover: 0 10px 20px rgba(74, 144, 226, 0.15);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            padding: 2rem;
+            line-height: 1.5;
+        }
+
+        header {
+            max-width: 1200px;
+            margin: 0 auto 2.5rem auto;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 1rem;
+        }
+
+        .header-title-container {
+            display: block;
+        }
+
+        header h1 {
+            font-size: 2rem;
+            color: #2c3e50;
+            display: inline-block;
+            vertical-align: middle;
+        }
+
+        /* Dynamic Tool Counter Badge */
+        .tool-counter {
+            display: inline-block;
+            vertical-align: middle;
+            background-color: var(--primary-color);
+            color: #ffffff;
+            font-size: 0.9rem;
+            font-weight: 600;
+            padding: 0.2rem 0.75rem;
+            border-radius: 20px;
+            margin-left: 1rem;
+        }
+
+        header p {
+            color: var(--text-secondary);
+            margin-top: 0.5rem;
+        }
+
+        /* Tools Grid Layout */
+        .tools-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* Tool Card Base Style */
+        .tool-card {
+            background-color: var(--card-bg);
+            /* Preset a 2px standard border width to prevent layout shifting on hover transitions */
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+            transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            text-decoration: none;
+            color: inherit;
+        }
+
+        /* Hover Effect: Changes border color to the accent hue and applies container lifting */
+        .tool-card:hover {
+            transform: translateY(-5px);
+            box-shadow: var(--shadow-hover);
+            border-color: var(--primary-color);
+        }
+
+        /* Preview Iframe Container */
+        .preview-container {
+            position: relative;
+            width: 100%;
+            padding-top: 56.25%; /* 16:9 Aspect Ratio */
+            background-color: #f8f9fa;
+            border-bottom: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+
+        /* Scale down the iframe content to serve cleanly as a thumbnail preview */
+        .preview-container iframe {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 300%;
+            height: 300%;
+            border: none;
+            transform: scale(0.333);
+            transform-origin: top left;
+            pointer-events: none; /* Prevents internal iframe content from hijacking clicks on the card block */
+        }
+
+        /* Card Typography and Content Layout */
+        .tool-info {
+            padding: 1.25rem;
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+        }
+
+        .tool-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 0.75rem;
+        }
+
+        .tool-name {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .tool-version {
+            font-size: 0.75rem;
+            background-color: #e8f0fe;
+            color: var(--primary-color);
+            padding: 0.2rem 0.5rem;
+            border-radius: 20px;
+            font-weight: 500;
+        }
+
+        /* Bulleted Description List Style */
+        .tool-desc-list {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            list-style-type: disc; /* Ensures a standard bullet point on the left */
+            padding-left: 1.2rem; /* Indents the text to align cleanly after the bullet */
+            flex-grow: 1;
+        }
+
+        .tool-desc-list li {
+            margin-bottom: 0.25rem;
+        }
+        
+        .tool-desc-list li:last-child {
+            margin-bottom: 0;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-title-container">
+            <h1>Toolbox</h1>
+            <span class="tool-counter" id="toolCounter">0 Tools</span>
+        </div>
+        <p>Click any tool card to launch the full utility in a new browser tab.</p>
+    </header>
+
+    <!-- Main Container for Cards -->
+    <main class="tools-grid" id="toolsGrid"></main>
+
+    <script>
+        // ===================================================
+        // Structured Sub-tool Configuration Array
+        // Add new tools here; the interface updates automatically.
+        // ===================================================
+        const toolsData = [
+            {
+                dir: "stopwatch",
+                name: "Stopwatch",
+                version: "v1.0.0", // Leaving it empty hides the version tag entirely
+                desc: [
+                    "Supports milliseconds accuracy.",
+					"Display visual stopwatch down to milliseconds.",
+                ]
+            },
+            {
+                dir: "image-annotator",
+                name: "Image Annotator",
+                version: "v0.9.0", // Leaving it empty hides the version tag entirely
+                desc: [
+                    "Supports drag-and-drop image uploading.",
+					"Mirror, flip, and rotate images.",
+                    "Draw shapes, lines and arrows onto images.",
+                    "Append text, numbered marker and highlighter onto images.",
+                    "Export to PNG format."
+                ]
+            },
+            {
+                dir: "diff-tool",
+                name: "Diff Tool",
+                version: "", // Leaving it empty hides the version tag entirely
+                desc: [
+                    "Supports drag-and-drop file uploading.",
+					"Supports 2-way / 3-way text difference comparison.",
+                    "Identifies discrepancies at both the block and inline levels.",
+					"Provides intuitive action buttons allowing merge discrepancies.",
+                ]
+            },
+        ];
+
+        // ===================================================
+        // Dynamic Card Rendering & Statistics Logic
+        // ===================================================
+        function renderTools() {
+            const grid = document.getElementById('toolsGrid');
+            const counter = document.getElementById('toolCounter');
+            
+            // Clear the grid container before render
+            grid.innerHTML = ''; 
+            
+            // Update the total tool count badge dynamically
+            counter.textContent = `${toolsData.length} ${toolsData.length === 1 ? 'Tool' : 'Tools'}`;
+
+            // Build and append card elements from configuration array
+            toolsData.forEach(tool => {
+                const toolUrl = `./${tool.dir}/index.html`;
+
+                // Create the card anchor tag
+                const card = document.createElement('a');
+                card.className = 'tool-card';
+                card.href = toolUrl;
+                card.target = '_blank'; // Launches the tool target within a separate browser tab
+
+                // Conditionally render the version tag markup only if the field is not empty
+                const versionMarkup = (tool.version && tool.version.trim() !== "") 
+                    ? `<span class="tool-version">${tool.version}</span>` 
+                    : "";
+
+                // Map the description array elements into <li> string elements
+                const descItemsMarkup = Array.isArray(tool.desc) 
+                    ? tool.desc.map(item => `<li>${item}</li>`).join('')
+                    : `<li>${tool.desc}</li>`;
+
+                // Set up inner structural layout including preview iframe and ul list
+                card.innerHTML = `
+                    <div class="preview-container">
+                        <iframe src="${toolUrl}" loading="lazy" tabindex="-1"></iframe>
+                    </div>
+                    <div class="tool-info">
+                        <div class="tool-header">
+                            <span class="tool-name">${tool.name}</span>
+                            ${versionMarkup}
+                        </div>
+                        <ul class="tool-desc-list">
+                            ${descItemsMarkup}
+                        </ul>
+                    </div>
+                `;
+
+                grid.appendChild(card);
+            });
+        }
+
+        // Initialize execution upon document loading completion
+        document.addEventListener('DOMContentLoaded', renderTools);
+    </script>
+</body>
+</html>
