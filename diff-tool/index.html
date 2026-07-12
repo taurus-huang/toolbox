@@ -1144,10 +1144,14 @@ function setupScrollSync(){
       if(syncingScroll) return;
       syncingScroll = true;
       const top = e.target.scrollTop;
+      const left = e.target.scrollLeft;
       ids.forEach(other=>{
         if(other!==id){
           const el = document.getElementById(other);
-          if(!el.closest('.pane').classList.contains('hidden')) el.scrollTop = top;
+          if(!el.closest('.pane').classList.contains('hidden')){
+            el.scrollTop = top;
+            el.scrollLeft = left; // 水平scroll也同步，方便比對差異處
+          }
         }
       });
       syncingScroll = false;
