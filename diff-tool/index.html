@@ -98,6 +98,7 @@
     width:46px;flex-shrink:0;text-align:right;padding-right:8px;color:var(--line-num);
     user-select:none;font-size:12px;line-height:20px;background:var(--gutter-bg);
     border-right:1px solid var(--border);
+    position:sticky;left:0;z-index:4;
   }
   .line .content{
     flex:1;padding:0 8px;white-space:pre;outline:none;line-height:20px;min-height:20px;
@@ -112,7 +113,7 @@
   .gap-line{
     display:flex;align-items:center;height:8px;position:relative;width:100%;
   }
-  .gap-line .gap-num{width:46px;flex-shrink:0;border-right:1px solid var(--border);background:var(--gutter-bg);align-self:stretch;}
+  .gap-line .gap-num{width:46px;flex-shrink:0;border-right:1px solid var(--border);background:var(--gutter-bg);align-self:stretch;position:sticky;left:0;z-index:4;}
   .gap-line .gap-bar-wrap{flex:1;padding:0 8px;min-width:600px;}
   .gap-line .gap-bar{height:2px;border-radius:1px;}
   .gap-line.diff-add .gap-bar{background:var(--diff-add-border);}
