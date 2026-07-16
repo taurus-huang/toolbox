@@ -66,7 +66,7 @@
     flex:1;background:#f8f9fb;border:1px solid var(--border);color:var(--text);
     padding:4px 6px;border-radius:3px;font-size:12px;min-width:0;
   }
-  /* 唯讀路徑列樣式：改為灰色底色 */
+  /* Read-only path row style: use gray background */
   .pathrow input[type=text][readonly]{
     background:#e1e3e6;
     cursor:text;
@@ -92,7 +92,7 @@
   .pane-scroll::-webkit-scrollbar-thumb:hover{background:#9096a0;}
 
   .line{
-    display:flex;min-height:20px;position:relative;
+    display:flex;min-height:20px;position:relative;width:100%;
   }
   .line .num{
     width:46px;flex-shrink:0;text-align:right;padding-right:8px;color:var(--line-num);
@@ -106,10 +106,35 @@
   .line.empty .content{background:repeating-linear-gradient(45deg, rgba(0,0,0,0.03) 0px, rgba(0,0,0,0.03) 4px, transparent 4px, transparent 8px);}
   .line.empty .num{color:transparent;}
 
+  /* Gap marker: a thin line shown between two real lines to mark where
+     content was added/deleted on the other side, without reserving a
+     full blank numbered row. */
+  .gap-line{
+    display:flex;align-items:center;height:8px;position:relative;width:100%;
+  }
+  .gap-line .gap-num{width:46px;flex-shrink:0;border-right:1px solid var(--border);background:var(--gutter-bg);align-self:stretch;}
+  .gap-line .gap-bar-wrap{flex:1;padding:0 8px;min-width:600px;}
+  .gap-line .gap-bar{height:2px;border-radius:1px;}
+  .gap-line.diff-add .gap-bar{background:var(--diff-add-border);}
+  .gap-line.diff-del .gap-bar{background:var(--diff-del-border);}
+  .gap-line.gap-current{box-shadow:inset 0 0 0 1px var(--accent);}
+  .gap-line .actions{
+    position:sticky;right:4px;margin-left:auto;height:18px;display:none;
+    align-items:center;gap:3px;z-index:6;flex-shrink:0;
+  }
+  .gap-line:hover .actions{display:flex;}
+
   /* diff highlight backgrounds */
   .line.diff-mod{background:var(--diff-mod-line);}
   .line.diff-add{background:var(--diff-add-line);}
   .line.diff-del{background:var(--diff-del-line);}
+  /* .line's own box is capped to the visible pane width, so when a long
+     line is scrolled horizontally the row tint would stop short of the
+     content actually in view. .content's box grows with the real
+     (possibly overflowing) line width, so paint the tint there too. */
+  .line.diff-mod .content{background:var(--diff-mod-line);}
+  .line.diff-add .content{background:var(--diff-add-line);}
+  .line.diff-del .content{background:var(--diff-del-line);}
   .line.diff-mod .num{background:var(--diff-mod-border);color:#fff;}
   .line.diff-add .num{background:var(--diff-add-border);color:#fff;}
   .line.diff-del .num{background:var(--diff-del-border);color:#fff;}
@@ -117,8 +142,8 @@
 
   /* Hover action icons (shown on the line, at right edge of content) */
   .line .actions{
-    position:absolute;right:4px;top:0;height:20px;display:none;
-    align-items:center;gap:3px;z-index:5;
+    position:sticky;right:4px;margin-left:auto;height:20px;display:none;
+    align-items:center;gap:3px;z-index:5;flex-shrink:0;
   }
   .line:hover .actions{display:flex;}
   .actbtn{
@@ -294,6 +319,7 @@
    ====================================================================== */
 
 const LINE_H = 20; // px, must match CSS .line min-height
+const GAP_H = 8; // px, must match CSS .gap-line height
 
 /* ---------- State ---------- */
 
@@ -312,7 +338,7 @@ const state = {
 
 function splitLines(text){
   if(text === '') return [''];
-  // 兼顧 Windows (\r\n) 與 Unix (\n) 的換行符號切割
+  // Split on both Windows (\r\n) and Unix (\n) line endings
   return text.split(/\r?\n/);
 }
 
@@ -461,9 +487,41 @@ function classifyRow(row, mode){
       const mt = state.cols.mid.lines[row.mid.idx];
       const rt = state.cols.right.lines[row.right.idx];
       if(lt===mt && mt===rt) return {left:'equal',mid:'equal',right:'equal'};
-      return {left: lt===mt?'equal':'mod', mid:'equal', right: rt===mt?'equal':'mod', anyDiff:true};
+      return {left: lt===mt?'equal':'mod', mid:'mod', right: rt===mt?'equal':'mod', anyDiff:true};
     }
-    // missing one or more columns
+    // Partial presence: mid is the base. Compare left/right against mid,
+    // and treat "missing" columns as add/del relative to the base.
+    if(hasM && hasL && !hasR){
+      // Right removed this base line; compare left against the base
+      const mt = state.cols.mid.lines[row.mid.idx];
+      const lt = state.cols.left.lines[row.left.idx];
+      const leftEqual = lt===mt;
+      // If left matches the base exactly, the only real change here is
+      // right's deletion, so mark mid as deleted (red) too, not modified.
+      return {left: leftEqual ? 'equal' : 'mod', mid: leftEqual ? 'del' : 'mod', right:'del', anyDiff:true};
+    }
+    if(hasM && hasR && !hasL){
+      // Left removed this base line; compare right against the base
+      const mt = state.cols.mid.lines[row.mid.idx];
+      const rt = state.cols.right.lines[row.right.idx];
+      const rightEqual = rt===mt;
+      return {left:'del', mid: rightEqual ? 'del' : 'mod', right: rightEqual ? 'equal' : 'mod', anyDiff:true};
+    }
+    if(hasM && !hasL && !hasR){
+      // Base line was independently removed from both left and right
+      return {left:'del', mid:'del', right:'del', anyDiff:true};
+    }
+    if(hasL && !hasM && !hasR){
+      // Line only exists in left: newly added in left relative to the base.
+      // Right is equally absent here (same as mid), so it gets no marker.
+      return {left:'add', mid:'add', right:'equal', anyDiff:true};
+    }
+    if(hasR && !hasM && !hasL){
+      // Line only exists in right: newly added in right relative to the base.
+      // Left is equally absent here (same as mid), so it gets no marker.
+      return {left:'equal', mid:'add', right:'add', anyDiff:true};
+    }
+    // Fallback for any unexpected combination (should not normally occur)
     const res = {left:'equal',mid:'equal',right:'equal',anyDiff:true};
     res.left = hasL ? 'mod' : 'del';
     res.mid  = hasM ? 'mod' : 'del';
@@ -501,6 +559,48 @@ function buildDiffBlocks(){
   state.diffBlocks = blocks;
 }
 
+/* Determine the diff relationship between two specific columns for one row,
+   independent of the mid-centric classifyRow status. Used so each gutter
+   only reacts to real differences between the exact pair of columns it shows. */
+function pairDiffType(row, colA, colB){
+  if(colA==='mid' || colB==='mid'){
+    const midEmpty = !state.cols.mid.userLoaded || state.cols.mid.text.trim() === '';
+    if(midEmpty) return 'equal';
+  }
+  const a = row[colA], b = row[colB];
+  const hasA = a !== null, hasB = b !== null;
+  if(hasA && hasB){
+    const ta = state.cols[colA].lines[a.idx];
+    const tb = state.cols[colB].lines[b.idx];
+    return ta===tb ? 'equal' : 'mod';
+  }
+  if(hasA && !hasB) return 'del';
+  if(!hasA && hasB) return 'add';
+  return 'equal';
+}
+
+/* Group consecutive rows where colA/colB actually differ into blocks,
+   so gutter markers only appear where that specific pair has a real diff. */
+function buildPairBlocks(colA, colB){
+  const blocks = [];
+  let cur = null;
+  for(let i=0;i<state.rows.length;i++){
+    const t = pairDiffType(state.rows[i], colA, colB);
+    if(t !== 'equal'){
+      if(cur && cur.type===t){
+        cur.end = i;
+      } else {
+        if(cur) blocks.push(cur);
+        cur = {start:i, end:i, type:t};
+      }
+    } else if(cur){
+      blocks.push(cur); cur=null;
+    }
+  }
+  if(cur) blocks.push(cur);
+  return blocks;
+}
+
 /* ======================================================================
    Rendering
    ====================================================================== */
@@ -526,7 +626,7 @@ function recompute(){
   state.currentDiffIndex = state.diffBlocks.length ? 0 : -1;
   render();
   updateDiffCounter();
-  // 若有差異，預設畫面顯示第一個差異處
+  // If there are diffs, scroll to the first diff by default
   if(state.diffBlocks.length) scrollToRow(state.diffBlocks[0].start);
 }
 
@@ -586,11 +686,11 @@ function lineHtmlWithDiff(text, otherText, side){
 function buildActionButtons(rowIdx, col, hasLeftPane, hasRightPane){
   // col: 'left' | 'mid' | 'right'
   let html = '<div class="actions">';
-  if(hasRightPane){
-    html += `<button class="actbtn" data-action="copy-right" data-row="${rowIdx}" data-col="${col}" title="Merge to right">➡️</button>`;
-  }
   if(hasLeftPane){
     html += `<button class="actbtn" data-action="copy-left" data-row="${rowIdx}" data-col="${col}" title="Merge to left">⬅️</button>`;
+  }
+  if(hasRightPane){
+    html += `<button class="actbtn" data-action="copy-right" data-row="${rowIdx}" data-col="${col}" title="Merge to right">➡️</button>`;
   }
   html += `<button class="actbtn" data-action="delete-block" data-row="${rowIdx}" data-col="${col}" title="Delete this diff block">❌</button>`;
   html += '</div>';
@@ -609,7 +709,82 @@ function render(){
   renderColumn('left');
   if(mode==='3way') renderColumn('mid');
   renderColumn('right');
+  equalizeColumnWidths();
+  rebuildColumnLayouts();
   renderGutters();
+}
+
+/* Rows only need to be as wide as their own text (min 600px), so a short
+   line's diff background would otherwise stop short of the real scroll
+   extent whenever some other line in the file is longer. Force every
+   column's row container to the widest line's natural width so each row
+   (via width:100% on .line/.gap-line) stretches its highlight that far too. */
+function equalizeColumnWidths(){
+  const cols = state.mode==='3way' ? ['left','mid','right'] : ['left','right'];
+  cols.forEach(col=>{
+    const container = document.getElementById('lines-' + col);
+    if(!container) return;
+    container.style.width = ''; // clear any previously forced width before measuring
+    const w = container.scrollWidth;
+    container.style.width = w + 'px';
+  });
+}
+
+/* Each column can now have a different real rendered height, since
+   consecutive add/del gaps collapse into a single thin marker instead of
+   one blank row per skipped line. These layouts let us translate a row
+   index into that column's actual pixel offset (and back), so scrolling
+   can keep the same diff position aligned across panes despite the
+   differing heights. */
+function computeColumnLayout(col){
+  const n = state.rows.length;
+  const offsets = new Array(n);
+  let y = 0, i = 0;
+  while(i < n){
+    const cell = state.rows[i][col];
+    if(cell){
+      offsets[i] = y;
+      y += LINE_H;
+      i++;
+    } else {
+      const gapTop = y;
+      while(i < n && !state.rows[i][col]){
+        offsets[i] = gapTop;
+        i++;
+      }
+      y += GAP_H;
+    }
+  }
+  return { offsets, totalHeight: y };
+}
+
+function rebuildColumnLayouts(){
+  state.colLayout = {
+    left: computeColumnLayout('left'),
+    mid: computeColumnLayout('mid'),
+    right: computeColumnLayout('right'),
+  };
+}
+
+function offsetForRow(col, rowIdx){
+  const layout = state.colLayout && state.colLayout[col];
+  if(!layout || !layout.offsets.length) return 0;
+  const idx = Math.max(0, Math.min(rowIdx, layout.offsets.length-1));
+  return layout.offsets[idx];
+}
+
+/* Find the row whose top offset in this column is at or just before y
+   (binary search, since offsets are non-decreasing). */
+function rowAtOffset(col, y){
+  const layout = state.colLayout && state.colLayout[col];
+  if(!layout || !layout.offsets.length) return 0;
+  const offsets = layout.offsets;
+  let lo=0, hi=offsets.length-1, ans=0;
+  while(lo<=hi){
+    const mid=(lo+hi)>>1;
+    if(offsets[mid] <= y){ ans=mid; lo=mid+1; } else { hi=mid-1; }
+  }
+  return ans;
 }
 
 function renderColumn(col){
@@ -620,11 +795,53 @@ function renderColumn(col){
   const hasLeftPane = (col!=='left'); // is there a pane to the left of this one
   const hasRightPane = (col!=='right'); // is there a pane to the right of this one
 
+  // Consecutive gap rows (add/del) for this column collapse into a single
+  // thin marker line rendered between the two real lines that surround them,
+  // instead of one blank numbered row per gap.
+  let pendingGap = null; // {type:'add'|'del', current:boolean, rowIdx:number, leftHasContent:boolean, rightHasContent:boolean}
+  const flushGap = () => {
+    if(!pendingGap) return;
+    const typeCls = pendingGap.type==='add' ? 'diff-add' : 'diff-del';
+    const curCls = pendingGap.current ? ' gap-current' : '';
+    const label = pendingGap.type==='add' ? 'Content added here' : 'Content deleted here';
+    let effHasLeftPane = hasLeftPane;
+    let effHasRightPane = hasRightPane;
+    if(col==='mid'){
+      // Mid has no content here. If left is equally absent, there's nothing
+      // to merge to/from left; same logic for right.
+      if(!pendingGap.leftHasContent) effHasLeftPane = false;
+      if(!pendingGap.rightHasContent) effHasRightPane = false;
+    }
+    const actionsHtml = buildActionButtons(pendingGap.rowIdx, col, effHasLeftPane, effHasRightPane);
+    html += `<div class="gap-line ${typeCls}${curCls}" title="${label}">`
+          + `<div class="gap-num"></div>`
+          + `<div class="gap-bar-wrap"><div class="gap-bar"></div></div>`
+          + actionsHtml
+          + `</div>`;
+    pendingGap = null;
+  };
+
   for(let i=0;i<state.rows.length;i++){
     const row = state.rows[i];
     const cell = row[col];
     const cls = row._cls;
     const status = cls ? cls[col] : 'equal';
+    const isCurrent = (i===state.diffBlocks[state.currentDiffIndex]?.start);
+
+    if(!cell){
+      // Gap row: accumulate into the pending marker instead of rendering a blank line
+      if(status==='add' || status==='del'){
+        if(!pendingGap) pendingGap = {type:status, current:false, rowIdx:i, leftHasContent:false, rightHasContent:false};
+        else pendingGap.type = status;
+        if(isCurrent) pendingGap.current = true;
+        if(row.left) pendingGap.leftHasContent = true;
+        if(row.right) pendingGap.rightHasContent = true;
+      }
+      continue;
+    }
+
+    // Real line present: flush any pending gap marker right before it
+    flushGap();
 
     let lineClasses = 'line';
     let lineNum = '';
@@ -632,42 +849,50 @@ function renderColumn(col){
     let editable = 'false';
     let actionsHtml = '';
 
-    if(cell){
-      lineNum = (cell.idx+1).toString();
-      editable = 'true';
-      if(status==='mod'){
-        lineClasses += ' diff-mod';
-        // find the paired column for intra-line char diff
-        let otherCol = null;
-        if(col==='left') otherCol = mode==='3way' ? 'mid' : 'right';
-        else if(col==='right') otherCol = mode==='3way' ? 'mid' : 'left';
-        else if(col==='mid') otherCol = 'right'; // mid vs right as reference
-        const otherCell = otherCol ? row[otherCol] : null;
-        if(otherCell && state.cols[otherCol].lines[otherCell.idx] !== undefined){
-          const otherText = state.cols[otherCol].lines[otherCell.idx];
-          const side = (col==='left' || (col==='mid' && otherCol==='right')) ? 'del' : 'ins';
-          content = lineHtmlWithDiff(colData.lines[cell.idx], otherText, side);
-        } else {
-          content = lineHtml(colData.lines[cell.idx]);
-        }
+    lineNum = (cell.idx+1).toString();
+    editable = 'true';
+    if(status==='mod'){
+      lineClasses += ' diff-mod';
+      // find the paired column for intra-line char diff
+      let otherCol = null;
+      if(col==='left') otherCol = mode==='3way' ? 'mid' : 'right';
+      else if(col==='right') otherCol = mode==='3way' ? 'mid' : 'left';
+      else if(col==='mid'){
+        // Mid is the base: compare against whichever side actually differs from it
+        const midText = colData.lines[cell.idx];
+        const rightCell = row.right, leftCell = row.left;
+        const rightText = rightCell ? state.cols.right.lines[rightCell.idx] : undefined;
+        const leftText = leftCell ? state.cols.left.lines[leftCell.idx] : undefined;
+        if(rightText !== undefined && rightText !== midText) otherCol = 'right';
+        else if(leftText !== undefined && leftText !== midText) otherCol = 'left';
+        else otherCol = 'right';
+      }
+      const otherCell = otherCol ? row[otherCol] : null;
+      if(otherCell && state.cols[otherCol].lines[otherCell.idx] !== undefined){
+        const otherText = state.cols[otherCol].lines[otherCell.idx];
+        const side = (col==='left' || (col==='mid' && otherCol==='right')) ? 'del' : 'ins';
+        content = lineHtmlWithDiff(colData.lines[cell.idx], otherText, side);
       } else {
         content = lineHtml(colData.lines[cell.idx]);
-        if(status==='add') lineClasses += ' diff-add';
-        else if(status==='del') lineClasses += ' diff-del';
       }
     } else {
-      lineClasses += ' empty';
+      content = lineHtml(colData.lines[cell.idx]);
       if(status==='add') lineClasses += ' diff-add';
       else if(status==='del') lineClasses += ' diff-del';
-      else if(status==='mod') lineClasses += ' diff-mod';
     }
 
-    if(i===state.diffBlocks[state.currentDiffIndex]?.start){
+    if(isCurrent){
       lineClasses += ' diff-current';
     }
 
     if(cls && cls.anyDiff){
-      actionsHtml = buildActionButtons(i, col, hasLeftPane, hasRightPane);
+      let effHasLeftPane = hasLeftPane;
+      let effHasRightPane = hasRightPane;
+      if(col==='mid'){
+        if(cls.left==='equal') effHasLeftPane = false;
+        if(cls.right==='equal') effHasRightPane = false;
+      }
+      actionsHtml = buildActionButtons(i, col, effHasLeftPane, effHasRightPane);
     }
 
     html += `<div class="${lineClasses}" data-row="${i}" data-col="${col}">`
@@ -676,14 +901,19 @@ function renderColumn(col){
           + actionsHtml
           + `</div>`;
   }
+  // Trailing gap at the very end of the file (e.g. deleted/added last lines)
+  flushGap();
   container.innerHTML = html;
 }
 
 /* Render the gutter markers between panes, showing whole-file diff overview */
 function renderGutters(){
-  renderOneGutter('gutter-lm-track', 'left', state.mode==='3way' ? 'mid' : 'right');
   if(state.mode==='3way'){
+    // Mid is the base; left is the modified copy being compared against it.
+    renderOneGutter('gutter-lm-track', 'mid', 'left');
     renderOneGutter('gutter-mr-track', 'mid', 'right');
+  } else {
+    renderOneGutter('gutter-lm-track', 'left', 'right');
   }
   updateGutterViewport();
 }
@@ -697,23 +927,15 @@ function renderOneGutter(trackId, colA, colB){
   const gutterH = gutterEl.offsetHeight || 400;
 
   let html = '';
-  for(const block of state.diffBlocks){
+  const blocks = buildPairBlocks(colA, colB);
+  for(const block of blocks){
     // Map file row position -> gutter pixel (proportional)
     const topRatio    = (block.start * LINE_H) / totalFileH;
     const bottomRatio = ((block.end + 1) * LINE_H) / totalFileH;
     const top    = topRatio * gutterH;
     const height = Math.max(2, (bottomRatio - topRatio) * gutterH);
 
-    // determine marker type based on colA/colB statuses within block
-    let type = 'mod';
-    for(let i=block.start;i<=block.end;i++){
-      const cls = state.rows[i]._cls;
-      const sA = cls[colA], sB = cls[colB];
-      if(sA==='del' || sB==='add'){ type='del'; break; }
-      if(sA==='add' || sB==='del'){ type='add'; break; }
-      if(sA==='mod' || sB==='mod'){ type='mod'; }
-    }
-    html += `<div class="marker ${type}" style="top:${top.toFixed(1)}px;height:${height.toFixed(1)}px" data-block-start="${block.start}" title="跳到此差異"></div>`;
+    html += `<div class="marker ${block.type}" style="top:${top.toFixed(1)}px;height:${height.toFixed(1)}px" data-block-start="${block.start}" title="Jump to this diff"></div>`;
   }
   // viewport indicator placeholder (updated by updateGutterViewport)
   html += `<div class="viewport-indicator" id="${trackId}-vp"></div>`;
@@ -751,12 +973,12 @@ function updateDiffCounter(){
 }
 
 function scrollToRow(rowIdx){
-  const targetTop = rowIdx * LINE_H;
   const scrollers = state.mode==='3way'
-    ? ['scroll-left','scroll-mid','scroll-right']
-    : ['scroll-left','scroll-right'];
-  for(const id of scrollers){
+    ? [['scroll-left','left'],['scroll-mid','mid'],['scroll-right','right']]
+    : [['scroll-left','left'],['scroll-right','right']];
+  for(const [id,col] of scrollers){
     const el = document.getElementById(id);
+    const targetTop = offsetForRow(col, rowIdx);
     const center = targetTop - el.clientHeight/2 + LINE_H/2;
     el.scrollTop = Math.max(0, center);
   }
@@ -872,11 +1094,11 @@ function deleteBlock(rowIdx, col){
 
 function commitColumnEdits(col){
   const container = document.getElementById('lines-'+col);
-  // 只選取真正有對應到原始檔案行（有在對應結構內）的非 empty 元素進行文字收集
+  // Only collect text from non-empty elements that actually map back to an original file line
   const lineEls = container.querySelectorAll('.line:not(.empty) .content[contenteditable="true"]');
   const newLines = [];
   lineEls.forEach(el=>{ 
-    // 使用 textContent 讀取，並置換掉可能隱含的 \r 或影響版面的特殊字元
+    // Read via textContent, and strip any stray \r or layout-affecting special characters
     newLines.push(el.textContent.replace(/\r/g, '')); 
   });
   
@@ -1139,18 +1361,27 @@ function setStatus(msg){
 let syncingScroll = false;
 function setupScrollSync(){
   const ids = ['scroll-left','scroll-mid','scroll-right'];
+  const idToCol = id => id.slice('scroll-'.length);
   ids.forEach(id=>{
     document.getElementById(id).addEventListener('scroll', (e)=>{
       if(syncingScroll) return;
       syncingScroll = true;
+      const srcCol = idToCol(id);
       const top = e.target.scrollTop;
       const left = e.target.scrollLeft;
+      // Find which row is at this pane's scroll position, then align every
+      // other pane to that same row using its own real layout, so the
+      // actual diff position stays lined up even if the panes' total
+      // rendered heights differ (due to collapsed add/del gaps).
+      const row = rowAtOffset(srcCol, top);
+      const remainder = top - offsetForRow(srcCol, row);
       ids.forEach(other=>{
         if(other!==id){
           const el = document.getElementById(other);
           if(!el.closest('.pane').classList.contains('hidden')){
-            el.scrollTop = top;
-            el.scrollLeft = left; // 水平scroll也同步，方便比對差異處
+            const otherCol = idToCol(other);
+            el.scrollTop = Math.max(0, offsetForRow(otherCol, row) + remainder);
+            el.scrollLeft = left; // Sync horizontal scroll too, to make diff comparison easier
           }
         }
       });
@@ -1191,13 +1422,13 @@ document.getElementById('nav-last').addEventListener('click', ()=>goToDiff('last
 document.getElementById('btn-recompute').addEventListener('click', async () => {
   setStatus('Reloading files and recomputing diff...');
   
-  // 依序重新讀取有載入過檔案的欄位
+  // Reload each column that has a previously loaded file, in order
   if (state.cols.left.userLoaded)  await refreshFile('left');
   if (state.mode === '3way' && state.cols.mid.userLoaded)   await refreshFile('mid');
   if (state.cols.right.userLoaded) await refreshFile('right');
   
-  // refreshFile 內部成功時會自動呼叫 recompute()，
-  // 這裡強制再呼叫一次以確保即使檔案沒變也重新整理畫面與計算
+  // refreshFile already calls recompute() internally on success,
+  // but call it again here to force a refresh even if no file actually changed
   recompute();
   setStatus('All files reloaded and diff recomputed');
 });
@@ -1265,7 +1496,7 @@ function setupGutterClicks(){
       const marker = e.target.closest('.marker');
       if(marker){
         const startRow = parseInt(marker.dataset.blockStart, 10);
-        const idx = state.diffBlocks.findIndex(b=>b.start===startRow);
+        const idx = state.diffBlocks.findIndex(b=> startRow>=b.start && startRow<=b.end);
         if(idx>=0){
           state.currentDiffIndex = idx;
           render();
