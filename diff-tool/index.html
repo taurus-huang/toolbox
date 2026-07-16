@@ -606,7 +606,17 @@ function buildPairBlocks(colA, colB){
    Rendering
    ====================================================================== */
 
-function recompute(){
+function recompute(opts){
+  const keepView = !!(opts && opts.keepView);
+  let savedScroll = null;
+  if(keepView){
+    savedScroll = {};
+    ['scroll-left','scroll-mid','scroll-right'].forEach(id=>{
+      const el = document.getElementById(id);
+      if(el) savedScroll[id] = { top: el.scrollTop, left: el.scrollLeft };
+    });
+  }
+
   state.cols.left.lines = splitLines(state.cols.left.text);
   state.cols.mid.lines = splitLines(state.cols.mid.text);
   state.cols.right.lines = splitLines(state.cols.right.text);
@@ -627,8 +637,21 @@ function recompute(){
   state.currentDiffIndex = state.diffBlocks.length ? 0 : -1;
   render();
   updateDiffCounter();
-  // If there are diffs, scroll to the first diff by default
-  if(state.diffBlocks.length) scrollToRow(state.diffBlocks[0].start);
+
+  if(keepView && savedScroll){
+    // Stay where the user was instead of jumping to the first diff
+    Object.keys(savedScroll).forEach(id=>{
+      const el = document.getElementById(id);
+      if(el){
+        el.scrollTop = savedScroll[id].top;
+        el.scrollLeft = savedScroll[id].left;
+      }
+    });
+    updateGutterViewport();
+  } else if(state.diffBlocks.length){
+    // If there are diffs, scroll to the first diff by default
+    scrollToRow(state.diffBlocks[0].start);
+  }
 }
 
 function escapeHtml(str){
@@ -1063,7 +1086,7 @@ function mergeBlock(rowIdx, fromCol, toCol){
 
   pushHistory(toCol);
   state.cols[toCol].text = destLines.join('\n');
-  recompute();
+  recompute({keepView:true});
   setStatus(`Merged ${colLabel(fromCol)} → ${colLabel(toCol)}`);
 }
 
@@ -1085,7 +1108,7 @@ function deleteBlock(rowIdx, col){
     pushHistory(col);
     state.cols[col].text = destLines.join('\n');
   }
-  recompute();
+  recompute({keepView:true});
   setStatus(`Deleted diff block from ${colLabel(col)}`);
 }
 
