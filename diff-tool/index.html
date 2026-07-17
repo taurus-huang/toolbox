@@ -1293,39 +1293,84 @@ function isFileDrag(e){
   return !!(e.dataTransfer && e.dataTransfer.types && Array.from(e.dataTransfer.types).includes('Files'));
 }
 
-async function loadDroppedFile(col, dt){
-  // Prefer a re-readable FileSystemFileHandle (Chrome/Edge) so the Refresh
-  // button keeps working after a drag & drop load, same as via Open.
-  // Per the File System Access API, getAsFileSystemHandle() must be called
-  // synchronously off the drop event before any other await, so we grab it
-  // immediately instead of looping with awaits in between.
-  let handle = null;
-  let file = null;
+// Extract every dropped file (not just the first), grabbing FileSystemFileHandles
+// synchronously where available so the Refresh button keeps working afterwards.
+// Per the File System Access API, getAsFileSystemHandle()/getAsFile() must be
+// called synchronously off the drop event before any other await, so all items
+// are grabbed up front rather than looping with awaits in between.
+async function getAllDroppedFiles(dt){
+  const results = [];
   try{
     if(dt.items && dt.items.length){
-      const fileItem = Array.from(dt.items).find(it => it.kind === 'file');
-      if(fileItem){
-        if(typeof fileItem.getAsFileSystemHandle === 'function'){
-          const h = await fileItem.getAsFileSystemHandle();
-          if(h && h.kind === 'file'){ handle = h; file = await h.getFile(); }
+      const fileItems = Array.from(dt.items).filter(it => it.kind === 'file');
+      const handlePromises = fileItems.map(it =>
+        typeof it.getAsFileSystemHandle === 'function' ? it.getAsFileSystemHandle() : Promise.resolve(null)
+      );
+      const fallbackFiles = fileItems.map(it => it.getAsFile());
+      const handles = await Promise.all(handlePromises.map(p => Promise.resolve(p).catch(()=>null)));
+      for(let i=0;i<fileItems.length;i++){
+        let handle = handles[i];
+        let file = null;
+        if(handle && handle.kind === 'file'){
+          try{ file = await handle.getFile(); }catch(err){ handle = null; }
         }
-        if(!file) file = fileItem.getAsFile();
+        if(!file) file = fallbackFiles[i];
+        if(file) results.push({ file, handle: (handle && handle.kind==='file') ? handle : null });
       }
     }
-    if(!file && dt.files && dt.files.length) file = dt.files[0];
+    if(!results.length && dt.files && dt.files.length){
+      Array.from(dt.files).forEach(f => results.push({ file: f, handle: null }));
+    }
   }catch(err){
-    if(!file && dt.files && dt.files.length) file = dt.files[0];
+    if(!results.length && dt.files && dt.files.length){
+      Array.from(dt.files).forEach(f => results.push({ file: f, handle: null }));
+    }
   }
-  if(!file){ setStatus(`${colLabel(col)}: no file detected in the drop`); return; }
+  return results;
+}
 
+async function loadFileIntoColumn(col, file, handle){
+  const text = await file.text();
+  pushHistory(col);
+  state.cols[col].text = text;
+  state.cols[col].fullPath = file.webkitRelativePath || file.name;
+  state.cols[col].userLoaded = true;
+  state.cols[col].handle = handle || null; // null if this browser can't give a reusable handle
+  syncPathInput(col);
+}
+
+function setActiveModeButtons(mode){
+  document.getElementById('btn-2way').classList.toggle('active', mode==='2way');
+  document.getElementById('btn-3way').classList.toggle('active', mode==='3way');
+}
+
+async function loadDroppedFile(col, dt){
+  const entries = await getAllDroppedFiles(dt);
+  if(!entries.length){ setStatus(`${colLabel(col)}: no file detected in the drop`); return; }
+
+  if(entries.length >= 2){
+    // Multiple files dropped at once: auto-switch mode and fill left-to-right,
+    // regardless of which specific pane/path bar the files landed on.
+    const wantMode = entries.length >= 3 ? '3way' : '2way';
+    const useCols = wantMode==='3way' ? ['left','mid','right'] : ['left','right'];
+    state.mode = wantMode;
+    setActiveModeButtons(wantMode);
+    try{
+      for(let i=0;i<useCols.length;i++){
+        await loadFileIntoColumn(useCols[i], entries[i].file, entries[i].handle);
+      }
+      recompute();
+      const summary = useCols.map((c,i)=>`${colLabel(c)}=${entries[i].file.name}`).join(', ');
+      setStatus(`Switched to ${wantMode} and loaded ${useCols.length} files via drag & drop: ${summary}`);
+    }catch(err){
+      setStatus('Failed to read one or more dropped files');
+    }
+    return;
+  }
+
+  // Single file: load into whichever zone it was dropped on (unchanged behavior)
   try{
-    const text = await file.text();
-    pushHistory(col);
-    state.cols[col].text = text;
-    state.cols[col].fullPath = file.webkitRelativePath || file.name;
-    state.cols[col].userLoaded = true;
-    state.cols[col].handle = handle; // null if this browser can't give a reusable handle
-    syncPathInput(col);
+    await loadFileIntoColumn(col, entries[0].file, entries[0].handle);
     recompute();
     setStatus(`Loaded ${colLabel(col)} via drag & drop: ${state.cols[col].fullPath}`);
   }catch(err){
@@ -1362,10 +1407,6 @@ function setupDropZone(el, col){
 }
 
 function setupAllDropZones(){
-  // Path bar: drop a file onto a path row to load it into that column.
-  setupDropZone(document.getElementById('path-left').closest('.col-label'), 'left');
-  setupDropZone(document.getElementById('path-mid').closest('.col-label'), 'mid');
-  setupDropZone(document.getElementById('path-right').closest('.col-label'), 'right');
   // Content area: drop a file anywhere on a pane to load it into that column.
   setupDropZone(document.getElementById('pane-left'), 'left');
   setupDropZone(document.getElementById('pane-mid'), 'mid');
