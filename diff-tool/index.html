@@ -87,7 +87,7 @@
     flex:1;overflow-y:auto;overflow-x:auto;position:relative;font-family:Consolas,"Courier New",monospace;font-size:13px;line-height:20px;
   }
   .pane-scroll::-webkit-scrollbar{width:12px;height:12px;}
-  .pane-scroll::-webkit-scrollbar-track{background:var(--panel);}
+  .pane-scroll::-webkit-scrollbar-track{background:#e5e5e5;}
   .pane-scroll::-webkit-scrollbar-thumb{background:#b0b4bc;border-radius:6px;}
   .pane-scroll::-webkit-scrollbar-thumb:hover{background:#9096a0;}
 
@@ -102,7 +102,7 @@
   }
   .line .content{
     flex:1;padding:0 8px;white-space:pre;outline:none;line-height:20px;min-height:20px;
-    cursor:text;min-width:600px;
+    cursor:text;min-width:0;
   }
   .line.empty .content{background:repeating-linear-gradient(45deg, rgba(0,0,0,0.03) 0px, rgba(0,0,0,0.03) 4px, transparent 4px, transparent 8px);}
   .line.empty .num{color:transparent;}
@@ -114,16 +114,15 @@
     display:flex;align-items:center;height:8px;position:relative;width:100%;
   }
   .gap-line .gap-num{width:46px;flex-shrink:0;border-right:1px solid var(--border);background:var(--gutter-bg);align-self:stretch;position:sticky;left:0;z-index:4;}
-  .gap-line .gap-bar-wrap{flex:1;padding:0 8px;min-width:600px;}
+  .gap-line .gap-bar-wrap{flex:1;padding:0 8px;min-width:0;}
   .gap-line .gap-bar{height:2px;border-radius:1px;}
   .gap-line.diff-add .gap-bar{background:var(--diff-add-border);}
   .gap-line.diff-del .gap-bar{background:var(--diff-del-border);}
   .gap-line.gap-current{box-shadow:inset 0 0 0 1px var(--accent);}
   .gap-line .actions{
-    position:sticky;right:4px;margin-left:auto;height:18px;display:none;
+    position:sticky;right:4px;margin-left:auto;height:18px;display:flex;
     align-items:center;gap:3px;z-index:6;flex-shrink:0;
   }
-  .gap-line:hover .actions{display:flex;}
 
   /* diff highlight backgrounds */
   .line.diff-mod{background:var(--diff-mod-line);}
@@ -141,12 +140,11 @@
   .line.diff-del .num{background:var(--diff-del-border);color:#fff;}
   .line.diff-current{box-shadow:inset 0 0 0 1px var(--accent);}
 
-  /* Hover action icons (shown on the line, at right edge of content) */
+  /* Action icons for each diff block, always visible (right edge of content) */
   .line .actions{
-    position:sticky;right:4px;margin-left:auto;height:20px;display:none;
+    position:sticky;right:4px;margin-left:auto;height:20px;display:flex;
     align-items:center;gap:3px;z-index:5;flex-shrink:0;
   }
-  .line:hover .actions{display:flex;}
   .actbtn{
     width:18px;height:18px;border-radius:3px;background:#c8cad0;border:1px solid var(--border);
     color:#1e1f22;display:flex;align-items:center;justify-content:center;font-size:11px;
@@ -156,17 +154,21 @@
 
   /* Gutter (between panes) showing overview diff markers - fixed minimap */
   .gutter{
-    width:30px;flex-shrink:0;background:var(--gutter-bg);border-left:1px solid var(--border);border-right:1px solid var(--border);
+    width:30px;flex-shrink:0;background:#E8EAEE;border-left:1px solid var(--border);border-right:1px solid var(--border);
     position:relative;overflow:hidden;cursor:pointer;
   }
   /* Connector strip between panes: no color fill, just lines linking the
      diff regions on the left side of the strip to the same regions on the
      right side, following each pane's current vertical scroll position. */
   .connector{
-    width:24px;flex-shrink:0;background:var(--panel);border-left:1px solid var(--border);border-right:1px solid var(--border);
+    width:24px;flex-shrink:0;background:#E8EAEE;border-left:1px solid var(--border);border-right:1px solid var(--border);
     position:relative;overflow:hidden;
   }
   .connector-svg{position:absolute;left:0;top:0;width:100%;height:100%;}
+  .connector-fill{stroke:none;}
+  .connector-fill.add{fill:var(--diff-add-line);}
+  .connector-fill.del{fill:var(--diff-del-line);}
+  .connector-fill.mod{fill:var(--diff-mod-line);}
   .connector-line{fill:none;stroke-width:1.5;opacity:.9;}
   .connector-line.add{stroke:var(--diff-add-border);}
   .connector-line.del{stroke:var(--diff-del-border);}
@@ -474,6 +476,17 @@ function buildRows2(leftLines, rightLines){
 }
 
 /* Determine the "status" of a row for each column: 'equal','mod','add','del' */
+/* Whether mid should be treated as "not participating" in the 3-way diff.
+   This is only true once the user has actually loaded left or right but not
+   mid (a meaningful left-vs-right preview). In the true default state,
+   where nothing has been loaded anywhere, this returns false so all three
+   columns get a normal 3-way comparison and behave consistently. */
+function isMidEmpty(){
+  const midHasContent = state.cols.mid.userLoaded && state.cols.mid.text.trim() !== '';
+  if(midHasContent) return false;
+  return !!(state.cols.left.userLoaded || state.cols.right.userLoaded);
+}
+
 function classifyRow(row, mode){
   const hasL = row.left!==null;
   const hasM = row.mid!==null;
@@ -482,7 +495,7 @@ function classifyRow(row, mode){
   if(mode==='3way'){
     // If mid column is entirely absent (userLoaded=false / empty), treat as 2-way diff
     // between left and right, mid shown as neutral empty
-    const midEmpty = !state.cols.mid.userLoaded || state.cols.mid.text.trim() === '';
+    const midEmpty = isMidEmpty();
     if(midEmpty){
       // classify only left vs right, mid stays neutral
       if(hasL && hasR){
@@ -579,8 +592,7 @@ function buildDiffBlocks(){
    only reacts to real differences between the exact pair of columns it shows. */
 function pairDiffType(row, colA, colB){
   if(colA==='mid' || colB==='mid'){
-    const midEmpty = !state.cols.mid.userLoaded || state.cols.mid.text.trim() === '';
-    if(midEmpty) return 'equal';
+    if(isMidEmpty()) return 'equal';
   }
   const a = row[colA], b = row[colB];
   const hasA = a !== null, hasB = b !== null;
@@ -636,7 +648,7 @@ function recompute(opts){
   state.cols.right.lines = splitLines(state.cols.right.text);
 
   if(state.mode==='3way'){
-    const midEmpty = !state.cols.mid.userLoaded || state.cols.mid.text.trim() === '';
+    const midEmpty = isMidEmpty();
     if(midEmpty){
       // Use left<->right diff, but keep mid column null (shown as empty pane)
       const rows2 = buildRows2(state.cols.left.lines, state.cols.right.lines);
@@ -751,11 +763,13 @@ function render(){
   renderGutters();
 }
 
-/* Rows only need to be as wide as their own text (min 600px), so a short
-   line's diff background would otherwise stop short of the real scroll
-   extent whenever some other line in the file is longer. Force every
-   column's row container to the widest line's natural width so each row
-   (via width:100% on .line/.gap-line) stretches its highlight that far too. */
+/* Rows only need to be as wide as their own text, so a short line's diff
+   background would otherwise stop short of the real scroll extent whenever
+   some other line in the file is longer. Force every column's row container
+   to the widest line's natural width so each row (via width:100% on
+   .line/.gap-line) stretches its highlight that far too. Re-run this on
+   window resize too, or a width measured before a resize could linger and
+   force a scrollbar that's no longer actually needed. */
 function equalizeColumnWidths(){
   const cols = state.mode==='3way' ? ['left','mid','right'] : ['left','right'];
   cols.forEach(col=>{
@@ -844,21 +858,26 @@ function renderColumn(col){
   // Consecutive gap rows (add/del) for this column collapse into a single
   // thin marker line rendered between the two real lines that surround them,
   // instead of one blank numbered row per gap.
-  let pendingGap = null; // {type:'add'|'del', current:boolean, rowIdx:number, leftHasContent:boolean, rightHasContent:boolean}
+  let pendingGap = null; // {type:'add'|'del', current:boolean, rowIdx:number, leftHasContent:boolean, rightHasContent:boolean, showButton:boolean}
+  // Only show one merge/delete button set per contiguous diff block, not one per line.
+  let shownButtonForRun = false;
   const flushGap = () => {
     if(!pendingGap) return;
     const typeCls = pendingGap.type==='add' ? 'diff-add' : 'diff-del';
     const curCls = pendingGap.current ? ' gap-current' : '';
     const label = pendingGap.type==='add' ? 'Content added here' : 'Content deleted here';
-    let effHasLeftPane = hasLeftPane;
-    let effHasRightPane = hasRightPane;
-    if(col==='mid'){
-      // Mid has no content here. If left is equally absent, there's nothing
-      // to merge to/from left; same logic for right.
-      if(!pendingGap.leftHasContent) effHasLeftPane = false;
-      if(!pendingGap.rightHasContent) effHasRightPane = false;
+    let actionsHtml = '';
+    if(pendingGap.showButton){
+      let effHasLeftPane = hasLeftPane;
+      let effHasRightPane = hasRightPane;
+      if(col==='mid'){
+        // Mid has no content here. If left is equally absent, there's nothing
+        // to merge to/from left; same logic for right.
+        if(!pendingGap.leftHasContent) effHasLeftPane = false;
+        if(!pendingGap.rightHasContent) effHasRightPane = false;
+      }
+      actionsHtml = buildActionButtons(pendingGap.rowIdx, col, effHasLeftPane, effHasRightPane);
     }
-    const actionsHtml = buildActionButtons(pendingGap.rowIdx, col, effHasLeftPane, effHasRightPane);
     html += `<div class="gap-line ${typeCls}${curCls}" title="${label}">`
           + `<div class="gap-num"></div>`
           + `<div class="gap-bar-wrap"><div class="gap-bar"></div></div>`
@@ -873,12 +892,23 @@ function renderColumn(col){
     const cls = row._cls;
     const status = cls ? cls[col] : 'equal';
     const isCurrent = (i===state.diffBlocks[state.currentDiffIndex]?.start);
+    const inDiffRun = !!(cls && cls.anyDiff);
+
+    if(!inDiffRun){
+      // Left the current diff block (back to an unchanged row); the next
+      // diff block encountered should get its own button set.
+      shownButtonForRun = false;
+    }
 
     if(!cell){
       // Gap row: accumulate into the pending marker instead of rendering a blank line
       if(status==='add' || status==='del'){
-        if(!pendingGap) pendingGap = {type:status, current:false, rowIdx:i, leftHasContent:false, rightHasContent:false};
-        else pendingGap.type = status;
+        if(!pendingGap){
+          pendingGap = {type:status, current:false, rowIdx:i, leftHasContent:false, rightHasContent:false, showButton: !shownButtonForRun};
+          if(pendingGap.showButton) shownButtonForRun = true;
+        } else {
+          pendingGap.type = status;
+        }
         if(isCurrent) pendingGap.current = true;
         if(row.left) pendingGap.leftHasContent = true;
         if(row.right) pendingGap.rightHasContent = true;
@@ -931,7 +961,7 @@ function renderColumn(col){
       lineClasses += ' diff-current';
     }
 
-    if(cls && cls.anyDiff){
+    if(cls && cls.anyDiff && !shownButtonForRun){
       let effHasLeftPane = hasLeftPane;
       let effHasRightPane = hasRightPane;
       if(col==='mid'){
@@ -939,6 +969,7 @@ function renderColumn(col){
         if(cls.right==='equal') effHasRightPane = false;
       }
       actionsHtml = buildActionButtons(i, col, effHasLeftPane, effHasRightPane);
+      shownButtonForRun = true;
     }
 
     html += `<div class="${lineClasses}" data-row="${i}" data-col="${col}">`
@@ -1020,6 +1051,8 @@ function renderConnector(svgId, leftPaneCol, rightPaneCol, baseCol){
     // Skip blocks that are entirely off-screen on both sides
     if(aBot < 0 && bBot < 0) continue;
     if(aTop > h && bTop > h) continue;
+    const points = `0,${aTop.toFixed(1)} ${w},${bTop.toFixed(1)} ${w},${bBot.toFixed(1)} 0,${aBot.toFixed(1)}`;
+    html += `<polygon class="connector-fill ${block.type}" points="${points}"/>`;
     html += `<line class="connector-line ${block.type}" x1="0" y1="${aTop.toFixed(1)}" x2="${w}" y2="${bTop.toFixed(1)}"/>`;
     html += `<line class="connector-line ${block.type}" x1="0" y1="${aBot.toFixed(1)}" x2="${w}" y2="${bBot.toFixed(1)}"/>`;
   }
@@ -1706,8 +1739,10 @@ setupAllDropZones();
 recompute();
 setStatus('Ready');
 
-// Re-render gutters when window is resized (gutter height changes)
+// Re-measure column widths and re-render gutters when window is resized
 window.addEventListener('resize', ()=>{
+  equalizeColumnWidths();
+  rebuildColumnLayouts();
   renderGutters();
 });
 </script>
