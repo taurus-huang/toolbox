@@ -159,6 +159,18 @@
     width:30px;flex-shrink:0;background:var(--gutter-bg);border-left:1px solid var(--border);border-right:1px solid var(--border);
     position:relative;overflow:hidden;cursor:pointer;
   }
+  /* Connector strip between panes: no color fill, just lines linking the
+     diff regions on the left side of the strip to the same regions on the
+     right side, following each pane's current vertical scroll position. */
+  .connector{
+    width:24px;flex-shrink:0;background:var(--panel);border-left:1px solid var(--border);border-right:1px solid var(--border);
+    position:relative;overflow:hidden;
+  }
+  .connector-svg{position:absolute;left:0;top:0;width:100%;height:100%;}
+  .connector-line{fill:none;stroke-width:1.5;opacity:.9;}
+  .connector-line.add{stroke:var(--diff-add-border);}
+  .connector-line.del{stroke:var(--diff-del-border);}
+  .connector-line.mod{stroke:var(--diff-mod-border);}
   /* gutter-track now fills the gutter exactly (no scroll transform) */
   .gutter-track{position:absolute;left:0;top:0;width:100%;height:100%;}
   .gutter .marker{
@@ -291,17 +303,19 @@
 
 <!-- ============ EDITOR AREA ============ -->
 <div class="editor-wrap" id="editor-wrap">
+  <div class="gutter" id="gutter-lm"><div class="gutter-track" id="gutter-lm-track"></div></div>
   <div class="pane" id="pane-left">
     <div class="pane-scroll" id="scroll-left"><div id="lines-left"></div></div>
   </div>
-  <div class="gutter" id="gutter-lm"><div class="gutter-track" id="gutter-lm-track"></div></div>
+  <div class="connector" id="connector-lm"><svg class="connector-svg" id="connector-lm-svg"></svg></div>
   <div class="pane" id="pane-mid">
     <div class="pane-scroll" id="scroll-mid"><div id="lines-mid"></div></div>
   </div>
-  <div class="gutter" id="gutter-mr"><div class="gutter-track" id="gutter-mr-track"></div></div>
+  <div class="connector" id="connector-mr"><svg class="connector-svg" id="connector-mr-svg"></svg></div>
   <div class="pane" id="pane-right">
     <div class="pane-scroll" id="scroll-right"><div id="lines-right"></div></div>
   </div>
+  <div class="gutter" id="gutter-mr"><div class="gutter-track" id="gutter-mr-track"></div></div>
 </div>
 
 <!-- ============ STATUS BAR ============ -->
@@ -726,9 +740,8 @@ function render(){
   document.getElementById('pane-mid').classList.toggle('hidden', mode!=='3way');
   document.getElementById('pathcol-mid').classList.toggle('hidden', mode!=='3way');
   document.getElementById('gutter-lm').classList.toggle('hidden', false);
-  document.getElementById('gutter-mr').classList.toggle('hidden', mode!=='3way');
-  // when 2way, gutter-lm acts as the single left<->right gutter
-  document.getElementById('gutter-lm-track').dataset.pair = mode==='3way' ? 'lm' : 'lr';
+  document.getElementById('gutter-mr').classList.toggle('hidden', false);
+  document.getElementById('connector-mr').classList.toggle('hidden', mode!=='3way');
 
   renderColumn('left');
   if(mode==='3way') renderColumn('mid');
@@ -809,6 +822,15 @@ function rowAtOffset(col, y){
     if(offsets[mid] <= y){ ans=mid; lo=mid+1; } else { hi=mid-1; }
   }
   return ans;
+}
+
+/* Bottom pixel edge of a row in this column's layout (top of the next row,
+   or the column's total height if this is the last row). */
+function rowBottomOffset(col, rowIdx){
+  const layout = state.colLayout && state.colLayout[col];
+  if(!layout || !layout.offsets.length) return 0;
+  if(rowIdx+1 < layout.offsets.length) return offsetForRow(col, rowIdx+1);
+  return layout.totalHeight;
 }
 
 function renderColumn(col){
@@ -930,14 +952,16 @@ function renderColumn(col){
   container.innerHTML = html;
 }
 
-/* Render the gutter markers between panes, showing whole-file diff overview */
+/* Render the gutter markers at the outer left/right edges, showing whole-file diff overview */
 function renderGutters(){
   if(state.mode==='3way'){
     // Mid is the base; left is the modified copy being compared against it.
     renderOneGutter('gutter-lm-track', 'mid', 'left');
     renderOneGutter('gutter-mr-track', 'mid', 'right');
   } else {
+    // Only one relationship to show in 2-way mode; mirror it on both edges.
     renderOneGutter('gutter-lm-track', 'left', 'right');
+    renderOneGutter('gutter-mr-track', 'left', 'right');
   }
   updateGutterViewport();
 }
@@ -966,6 +990,53 @@ function renderOneGutter(trackId, colA, colB){
   track.innerHTML = html;
 }
 
+/* Between-pane connector strips: no color fill, just lines linking each
+   diff region's current on-screen position on one side to its position on
+   the other side. baseCol tells buildPairBlocks which side is the "base"
+   (for correct add/del color semantics); leftPaneCol/rightPaneCol tell us
+   which column's real layout to use for the strip's left edge (x=0) and
+   right edge (x=width). */
+function renderConnector(svgId, leftPaneCol, rightPaneCol, baseCol){
+  const svg = document.getElementById(svgId);
+  if(!svg) return;
+  const wrapper = svg.parentElement;
+  const w = wrapper.clientWidth || 24;
+  const h = wrapper.clientHeight || 400;
+
+  const otherCol = baseCol===leftPaneCol ? rightPaneCol : leftPaneCol;
+  const blocks = buildPairBlocks(baseCol, otherCol);
+
+  const scrollLeftEl = document.getElementById('scroll-' + leftPaneCol);
+  const scrollRightEl = document.getElementById('scroll-' + rightPaneCol);
+  const scrollTopLeft = scrollLeftEl ? scrollLeftEl.scrollTop : 0;
+  const scrollTopRight = scrollRightEl ? scrollRightEl.scrollTop : 0;
+
+  let html = '';
+  for(const block of blocks){
+    const aTop = offsetForRow(leftPaneCol, block.start) - scrollTopLeft;
+    const aBot = rowBottomOffset(leftPaneCol, block.end) - scrollTopLeft;
+    const bTop = offsetForRow(rightPaneCol, block.start) - scrollTopRight;
+    const bBot = rowBottomOffset(rightPaneCol, block.end) - scrollTopRight;
+    // Skip blocks that are entirely off-screen on both sides
+    if(aBot < 0 && bBot < 0) continue;
+    if(aTop > h && bTop > h) continue;
+    html += `<line class="connector-line ${block.type}" x1="0" y1="${aTop.toFixed(1)}" x2="${w}" y2="${bTop.toFixed(1)}"/>`;
+    html += `<line class="connector-line ${block.type}" x1="0" y1="${aBot.toFixed(1)}" x2="${w}" y2="${bBot.toFixed(1)}"/>`;
+  }
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.innerHTML = html;
+}
+
+function renderConnectors(){
+  if(state.mode==='3way'){
+    renderConnector('connector-lm-svg', 'left', 'mid', 'mid');
+    renderConnector('connector-mr-svg', 'mid', 'right', 'mid');
+  } else {
+    renderConnector('connector-lm-svg', 'left', 'right', 'left');
+  }
+}
+
 /* Update the viewport indicator rectangle on all visible gutters */
 function updateGutterViewport(){
   const scrollEl = document.getElementById('scroll-left');
@@ -984,6 +1055,8 @@ function updateGutterViewport(){
     vp.style.top    = top.toFixed(1) + 'px';
     vp.style.height = height.toFixed(1) + 'px';
   });
+
+  renderConnectors();
 }
 
 /* ======================================================================
@@ -1006,6 +1079,7 @@ function scrollToRow(rowIdx){
     const center = targetTop - el.clientHeight/2 + LINE_H/2;
     el.scrollTop = Math.max(0, center);
   }
+  updateGutterViewport();
 }
 
 function goToDiff(target){
