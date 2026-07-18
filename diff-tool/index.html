@@ -107,20 +107,30 @@
   .line.empty .content{background:repeating-linear-gradient(45deg, rgba(0,0,0,0.03) 0px, rgba(0,0,0,0.03) 4px, transparent 4px, transparent 8px);}
   .line.empty .num{color:transparent;}
 
-  /* Gap marker: a thin line shown between two real lines to mark where
-     content was added/deleted on the other side, without reserving a
-     full blank numbered row. */
+  /* Gap marker: shown between two real lines to mark where content was
+     added/deleted on the other side. Takes up no vertical space of its
+     own (height:0) -- it's not a visible row at all -- but its merge/
+     delete action buttons still float at that seam so they stay usable. */
   .gap-line{
-    display:flex;align-items:center;height:8px;position:relative;width:100%;
+    display:flex;align-items:center;height:0;position:relative;width:100%;
+    overflow:visible;
   }
-  .gap-line .gap-num{width:46px;flex-shrink:0;border-right:1px solid var(--border);background:var(--gutter-bg);align-self:stretch;position:sticky;left:0;z-index:4;}
-  .gap-line .gap-bar-wrap{flex:1;padding:0 8px;min-width:0;}
-  .gap-line .gap-bar{height:2px;border-radius:1px;}
-  .gap-line.diff-add .gap-bar{background:var(--diff-add-border);}
-  .gap-line.diff-del .gap-bar{background:var(--diff-del-border);}
+  .gap-line .gap-num{width:46px;flex-shrink:0;align-self:stretch;position:sticky;left:0;z-index:4;}
+  .gap-line .gap-bar-wrap{flex:1;padding:0 8px;min-width:0;align-self:stretch;}
+  .gap-line .gap-bar{height:100%;width:100%;}
   .gap-line.gap-current{box-shadow:inset 0 0 0 1px var(--accent);}
+  /* Colored marker line at the gap's position. Spans the full row width,
+     including behind the sticky line-number column, so it reads as one
+     continuous line. Still kept below the sticky action buttons
+     (z-index:6) so it never covers them. */
+  .gap-line::after{
+    content:'';position:absolute;left:0;right:0;top:-1px;height:2px;
+    z-index:5;pointer-events:none;
+  }
+  .gap-line.diff-add::after{background:var(--diff-add-border);}
+  .gap-line.diff-del::after{background:var(--diff-del-border);}
   .gap-line .actions{
-    position:sticky;right:4px;margin-left:auto;height:18px;display:flex;
+    position:sticky;right:4px;margin-left:auto;height:20px;display:flex;
     align-items:center;gap:3px;z-index:6;flex-shrink:0;
   }
 
@@ -139,6 +149,28 @@
   .line.diff-add .num{background:var(--diff-add-border);color:#fff;}
   .line.diff-del .num{background:var(--diff-del-border);color:#fff;}
   .line.diff-current{box-shadow:inset 0 0 0 1px var(--accent);}
+
+  /* Diff block boundary lines: drawn only on the first/last row of each
+     contiguous diff block (not on every row), in the color matching that
+     row's own diff type. Uses absolutely-positioned pseudo-elements (not
+     a border) so the row's actual height/layout math is unaffected, and
+     a low z-index keeps them beneath the sticky .actions button layer
+     (z-index:5) so they never cover the merge/delete buttons. */
+  .line.diff-block-start::before{
+    content:'';position:absolute;left:0;right:0;top:0;height:2px;
+    z-index:1;pointer-events:none;
+  }
+  .line.diff-block-end::after{
+    content:'';position:absolute;left:0;right:0;bottom:0;height:2px;
+    z-index:1;pointer-events:none;
+  }
+  .line.diff-mod.diff-block-start::before{background:var(--diff-mod-border);}
+  .line.diff-add.diff-block-start::before{background:var(--diff-add-border);}
+  .line.diff-del.diff-block-start::before{background:var(--diff-del-border);}
+  .line.diff-mod.diff-block-end::after{background:var(--diff-mod-border);}
+  .line.diff-add.diff-block-end::after{background:var(--diff-add-border);}
+  .line.diff-del.diff-block-end::after{background:var(--diff-del-border);}
+
 
   /* Action icons for each diff block, always visible (right edge of content) */
   .line .actions{
@@ -336,7 +368,7 @@
    ====================================================================== */
 
 const LINE_H = 20; // px, must match CSS .line min-height
-const GAP_H = 8; // px, must match CSS .gap-line height
+const GAP_H = 0; // px, must match CSS .gap-line height (gap row takes no vertical space)
 
 /* ---------- State ---------- */
 
@@ -855,16 +887,23 @@ function renderColumn(col){
   const hasLeftPane = (col!=='left'); // is there a pane to the left of this one
   const hasRightPane = (col!=='right'); // is there a pane to the right of this one
 
+  // Row indices that are the first/last row of a contiguous diff block
+  // (state.diffBlocks is shared across all columns), used to draw a
+  // boundary line only at the top/bottom edge of each diff area.
+  const blockStartRows = new Set(state.diffBlocks.map(b=>b.start));
+  const blockEndRows = new Set(state.diffBlocks.map(b=>b.end));
+
   // Consecutive gap rows (add/del) for this column collapse into a single
   // thin marker line rendered between the two real lines that surround them,
   // instead of one blank numbered row per gap.
-  let pendingGap = null; // {type:'add'|'del', current:boolean, rowIdx:number, leftHasContent:boolean, rightHasContent:boolean, showButton:boolean}
+  let pendingGap = null; // {type:'add'|'del', current:boolean, rowIdx:number, leftHasContent:boolean, rightHasContent:boolean, showButton:boolean, blockStart:boolean, blockEnd:boolean}
   // Only show one merge/delete button set per contiguous diff block, not one per line.
   let shownButtonForRun = false;
   const flushGap = () => {
     if(!pendingGap) return;
     const typeCls = pendingGap.type==='add' ? 'diff-add' : 'diff-del';
     const curCls = pendingGap.current ? ' gap-current' : '';
+    const edgeCls = (pendingGap.blockStart ? ' diff-block-start' : '') + (pendingGap.blockEnd ? ' diff-block-end' : '');
     const label = pendingGap.type==='add' ? 'Content added here' : 'Content deleted here';
     let actionsHtml = '';
     if(pendingGap.showButton){
@@ -878,7 +917,7 @@ function renderColumn(col){
       }
       actionsHtml = buildActionButtons(pendingGap.rowIdx, col, effHasLeftPane, effHasRightPane);
     }
-    html += `<div class="gap-line ${typeCls}${curCls}" title="${label}">`
+    html += `<div class="gap-line ${typeCls}${curCls}${edgeCls}" title="${label}">`
           + `<div class="gap-num"></div>`
           + `<div class="gap-bar-wrap"><div class="gap-bar"></div></div>`
           + actionsHtml
@@ -904,7 +943,7 @@ function renderColumn(col){
       // Gap row: accumulate into the pending marker instead of rendering a blank line
       if(status==='add' || status==='del'){
         if(!pendingGap){
-          pendingGap = {type:status, current:false, rowIdx:i, leftHasContent:false, rightHasContent:false, showButton: !shownButtonForRun};
+          pendingGap = {type:status, current:false, rowIdx:i, leftHasContent:false, rightHasContent:false, showButton: !shownButtonForRun, blockStart:false, blockEnd:false};
           if(pendingGap.showButton) shownButtonForRun = true;
         } else {
           pendingGap.type = status;
@@ -912,6 +951,8 @@ function renderColumn(col){
         if(isCurrent) pendingGap.current = true;
         if(row.left) pendingGap.leftHasContent = true;
         if(row.right) pendingGap.rightHasContent = true;
+        if(blockStartRows.has(i)) pendingGap.blockStart = true;
+        if(blockEndRows.has(i)) pendingGap.blockEnd = true;
       }
       continue;
     }
@@ -960,6 +1001,9 @@ function renderColumn(col){
     if(isCurrent){
       lineClasses += ' diff-current';
     }
+
+    if(blockStartRows.has(i)) lineClasses += ' diff-block-start';
+    if(blockEndRows.has(i)) lineClasses += ' diff-block-end';
 
     if(cls && cls.anyDiff && !shownButtonForRun){
       let effHasLeftPane = hasLeftPane;
