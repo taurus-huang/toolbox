@@ -383,6 +383,20 @@ const state = {
   rows: [],
   diffBlocks: [], // list of {start, end, types:{left,mid,right}} - groups of consecutive non-equal rows
   currentDiffIndex: -1,
+  // Tracks where the editing caret actually is (unified row index + which
+  // column pane), updated whenever the user focuses a line. Null until the
+  // user has focused something, in which case navigation falls back to a
+  // computed default (see defaultCursorPosition()).
+  cursorRow: null,
+  cursorCol: null,
+  // When the caret's current position was reached by landing just after a
+  // diff block that has no real line in cursorCol (a gap-marker-only
+  // block), this holds that block's start row -- the "gap position" --
+  // which First/Prev/Next/Last use as the comparison basis instead of the
+  // landing row itself, so navigation doesn't get stuck re-selecting the
+  // same gap-only block forever. Null whenever the caret is on a genuine
+  // line (typed content or a real diff row).
+  cursorGapAnchor: null,
 };
 
 function splitLines(text){
@@ -1031,20 +1045,32 @@ function renderColumn(col){
 function renderGutters(){
   if(state.mode==='3way'){
     // Mid is the base; left is the modified copy being compared against it.
-    renderOneGutter('gutter-lm-track', 'mid', 'left');
-    renderOneGutter('gutter-mr-track', 'mid', 'right');
+    // ownCol is 'left'/'right' in both modes since each outer gutter sits
+    // beside that specific pane and should reflect that pane's own real
+    // line layout (gap rows collapse to zero height there).
+    renderOneGutter('gutter-lm-track', 'mid', 'left', 'left');
+    renderOneGutter('gutter-mr-track', 'mid', 'right', 'right');
   } else {
-    // Only one relationship to show in 2-way mode; mirror it on both edges.
-    renderOneGutter('gutter-lm-track', 'left', 'right');
-    renderOneGutter('gutter-mr-track', 'left', 'right');
+    // Only one relationship to show in 2-way mode; mirror it on both edges,
+    // but measure each gutter against its own adjacent column's layout.
+    renderOneGutter('gutter-lm-track', 'left', 'right', 'left');
+    renderOneGutter('gutter-mr-track', 'left', 'right', 'right');
   }
   updateGutterViewport();
 }
 
-function renderOneGutter(trackId, colA, colB){
+/* ownCol is the column whose real (post-gap-collapse) row layout this
+   gutter should be measured against -- 'left' for the gutter beside the
+   left pane, 'right' for the gutter beside the right pane. This makes a
+   marker's height proportional to how many *real* lines of ownCol fall
+   inside that diff block, not to the raw count of unified rows. A block
+   made up entirely of gap-marker rows in ownCol (i.e. content only exists
+   on the other side) then has zero real height there, so it's floored to
+   a thin single line instead of stretching proportionally. */
+function renderOneGutter(trackId, colA, colB, ownCol){
   const track = document.getElementById(trackId);
-  const totalRows = state.rows.length;
-  const totalFileH = Math.max(totalRows * LINE_H, 1);
+  const layout = state.colLayout && state.colLayout[ownCol];
+  const totalFileH = Math.max((layout && layout.totalHeight) || 0, 1);
   // gutterH will be measured at paint time; use offsetHeight of gutter element
   const gutterEl = track.parentElement;
   const gutterH = gutterEl.offsetHeight || 400;
@@ -1052,10 +1078,15 @@ function renderOneGutter(trackId, colA, colB){
   let html = '';
   const blocks = buildPairBlocks(colA, colB);
   for(const block of blocks){
-    // Map file row position -> gutter pixel (proportional)
-    const topRatio    = (block.start * LINE_H) / totalFileH;
-    const bottomRatio = ((block.end + 1) * LINE_H) / totalFileH;
+    // Map this block's real pixel span in ownCol's own layout -> gutter pixel (proportional)
+    const topPx = offsetForRow(ownCol, block.start);
+    const botPx = rowBottomOffset(ownCol, block.end);
+    const topRatio    = topPx / totalFileH;
+    const bottomRatio = botPx / totalFileH;
     const top    = topRatio * gutterH;
+    // Blocks with no real lines in ownCol (pure gap-marker rows, e.g. a
+    // pure addition on the other side) collapse to zero span; floor to a
+    // thin single-line marker rather than a proportional sliver.
     const height = Math.max(2, (bottomRatio - topRatio) * gutterH);
 
     html += `<div class="marker ${block.type}" style="top:${top.toFixed(1)}px;height:${height.toFixed(1)}px" data-block-start="${block.start}" title="Jump to this diff"></div>`;
@@ -1159,19 +1190,108 @@ function scrollToRow(rowIdx){
   updateGutterViewport();
 }
 
+/* First real (non-gap-marker) row of a block for a given column, or null
+   if every row in the block is a gap marker in that column (i.e. the block
+   has no real editable line there -- content only exists on the other
+   side/s). */
+function firstRealRowInBlock(block, col){
+  for(let i=block.start; i<=block.end; i++){
+    if(state.rows[i][col]) return i;
+  }
+  return null;
+}
+
+/* Default caret position before the user has ever focused a line:
+   the first diff block's first real row in the reference column, or --
+   if that block is made up entirely of gap-marker rows in that column --
+   the row right after it (for actually placing the caret), while the
+   navigation reference stays anchored at the block's own start (the gap
+   position itself) so Prev/Next compare against it correctly. With no
+   diff blocks at all, the first line. */
+function defaultCursorPosition(){
+  const col = state.cursorCol || 'left';
+  if(!state.diffBlocks.length) return {row:0, col, focusRow:0};
+  const b = state.diffBlocks[0];
+  const realRow = firstRealRowInBlock(b, col);
+  if(realRow !== null) return {row: realRow, col, focusRow: realRow};
+  const landingRow = Math.min(b.end+1, state.rows.length-1);
+  return {row: b.start, col, focusRow: landingRow};
+}
+
+/* Current caret reference position used as the basis for First/Prev/Next/Last:
+   wherever the user last actually focused, or the computed default. If the
+   caret's current spot is only there because it landed just past a
+   gap-only diff block, the comparison row is that block's own start (the
+   gap position) rather than the landing row, so navigation doesn't loop
+   on the same block. */
+function getCursorPosition(){
+  if(state.cursorRow !== null && state.cursorRow !== undefined){
+    const col = state.cursorCol || 'left';
+    const refRow = state.cursorGapAnchor !== null ? state.cursorGapAnchor : state.cursorRow;
+    return {row: refRow, col, focusRow: state.cursorRow};
+  }
+  return defaultCursorPosition();
+}
+
+/* Move the actual editing caret into the given row/column's line, if it
+   has real (non-gap) content there. */
+function focusCursorAt(row, col){
+  const el = document.querySelector(`.content[data-row="${row}"][data-col="${col}"]`);
+  if(!el) return;
+  el.focus({preventScroll:true});
+  const sel = window.getSelection();
+  if(!sel) return;
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
 function goToDiff(target){
   const n = state.diffBlocks.length;
   if(n===0) return;
-  if(target==='first') state.currentDiffIndex = 0;
-  else if(target==='last') state.currentDiffIndex = n-1;
-  else if(target==='next') state.currentDiffIndex = Math.min(n-1, state.currentDiffIndex+1);
-  else if(target==='prev') state.currentDiffIndex = Math.max(0, state.currentDiffIndex-1);
 
-  const block = state.diffBlocks[state.currentDiffIndex];
+  const cursor = getCursorPosition();
+
+  let targetIdx;
+  if(target==='first'){
+    targetIdx = 0;
+  } else if(target==='last'){
+    targetIdx = n-1;
+  } else if(target==='next'){
+    targetIdx = state.diffBlocks.findIndex(b => b.start > cursor.row);
+    if(targetIdx === -1) targetIdx = n-1;
+  } else if(target==='prev'){
+    targetIdx = -1;
+    for(let i=n-1; i>=0; i--){
+      if(state.diffBlocks[i].end < cursor.row){ targetIdx = i; break; }
+    }
+    if(targetIdx === -1) targetIdx = 0;
+  }
+
+  state.currentDiffIndex = targetIdx;
+  const block = state.diffBlocks[targetIdx];
+
+  // Land the caret on the first real line of the block in the reference
+  // column; if the block is only gap markers there, land just after it,
+  // but remember the block's start as the gap anchor for future nav.
+  const focusCol = cursor.col || 'left';
+  let focusRow = firstRealRowInBlock(block, focusCol);
+  let gapAnchor = null;
+  if(focusRow === null){
+    focusRow = Math.min(block.end+1, state.rows.length-1);
+    gapAnchor = block.start;
+  }
+
   render();
-  scrollToRow(block.start);
+  scrollToRow(focusRow);
+  focusCursorAt(focusRow, focusCol);
+  state.cursorRow = focusRow;
+  state.cursorCol = focusCol;
+  state.cursorGapAnchor = gapAnchor;
   updateDiffCounter();
-  setStatus(`Jumped to diff ${state.currentDiffIndex+1} / ${n}`);
+  setStatus(`Jumped to diff ${targetIdx+1} / ${n}`);
 }
 
 /* ======================================================================
@@ -1688,6 +1808,20 @@ document.getElementById('editor-wrap').addEventListener('click', (e)=>{
 document.getElementById('editor-wrap').addEventListener('input', (e)=>{
   if(e.target.classList.contains('content') && e.target.isContentEditable){
     onContentInput(e);
+  }
+});
+
+/* Track where the user actually places the caret, so First/Prev/Next/Last
+   can navigate relative to it instead of an independently-stepped counter. */
+document.getElementById('editor-wrap').addEventListener('focusin', (e)=>{
+  const el = e.target.closest('.content[contenteditable="true"]');
+  if(!el) return;
+  const row = parseInt(el.dataset.row, 10);
+  const col = el.dataset.col;
+  if(!Number.isNaN(row) && col){
+    state.cursorRow = row;
+    state.cursorCol = col;
+    state.cursorGapAnchor = null;
   }
 });
 
