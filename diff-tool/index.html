@@ -132,6 +132,7 @@
   .gap-line .actions{
     position:sticky;right:4px;margin-left:auto;height:20px;display:flex;
     align-items:center;gap:3px;z-index:6;flex-shrink:0;
+    user-select:none;
   }
 
   /* diff highlight backgrounds */
@@ -176,6 +177,7 @@
   .line .actions{
     position:sticky;right:4px;margin-left:auto;height:20px;display:flex;
     align-items:center;gap:3px;z-index:5;flex-shrink:0;
+    user-select:none;
   }
   .actbtn{
     width:18px;height:18px;border-radius:3px;background:#c8cad0;border:1px solid var(--border);
@@ -183,6 +185,16 @@
     cursor:pointer;line-height:1;padding:0;
   }
   .actbtn:hover{background:var(--accent);}
+
+  /* While the user is actively drag-selecting text (see
+     setupMultiLineSelection), let mouse hit-testing pass straight through
+     the sticky merge/delete buttons instead of landing on them -- they sit
+     on top of the line's text, and in narrower panes (e.g. 3-way mode,
+     where three columns share the width) they can cover enough of a line
+     that a drag crossing that row keeps "landing" on the button instead of
+     the text underneath, breaking the selection. Button clicks are
+     unaffected since this class is only present during an actual drag. */
+  #editor-wrap.is-selecting .actions{ pointer-events:none; }
 
   /* Gutter (between panes) showing overview diff markers - fixed minimap */
   .gutter{
@@ -1823,6 +1835,155 @@ document.getElementById('editor-wrap').addEventListener('focusin', (e)=>{
     state.cursorCol = col;
     state.cursorGapAnchor = null;
   }
+});
+
+/* Multi-line text selection: each line is rendered as its own separate
+   contenteditable div (see renderColumn), which browsers treat as an
+   editing boundary during a native mouse drag -- dragging from one line
+   into the next just gets clipped at that boundary, so only a single
+   line's text could ever be selected. Handling the drag manually with the
+   Selection API bypasses that per-element clipping, letting a drag span
+   any number of lines within the same pane, same as a normal editor. */
+(function setupMultiLineSelection(){
+  let isSelecting = false;
+  // The anchor is the fixed end of the selection (where a plain click
+  // started it); it persists after mouseup so a later Shift+click can
+  // extend the selection from that same point, like a normal text editor.
+  let anchorNode = null, anchorOffset = 0, anchorCol = null;
+
+  const editorWrapEl = document.getElementById('editor-wrap');
+
+  function caretFromPoint(x, y){
+    if(document.caretPositionFromPoint){
+      const pos = document.caretPositionFromPoint(x, y);
+      if(pos) return {node: pos.offsetNode, offset: pos.offset};
+    }
+    if(document.caretRangeFromPoint){
+      const range = document.caretRangeFromPoint(x, y);
+      if(range) return {node: range.startContainer, offset: range.startOffset};
+    }
+    return null;
+  }
+
+  function extendTo(x, y){
+    const caret = caretFromPoint(x, y);
+    if(!caret || !anchorNode) return;
+    const sel = window.getSelection();
+    if(!sel) return;
+    try{
+      sel.setBaseAndExtent(anchorNode, anchorOffset, caret.node, caret.offset);
+    }catch(err){ /* point briefly resolved to an invalid range mid-drag; ignore */ }
+  }
+
+  function startSelecting(){
+    isSelecting = true;
+    editorWrapEl.classList.add('is-selecting');
+  }
+
+  editorWrapEl.addEventListener('mousedown', (e)=>{
+    if(e.button !== 0) return; // left button only
+    if(e.detail > 1) return; // let native double/triple-click word/line selection behave normally
+    const contentEl = e.target.closest('.content[contenteditable="true"]');
+    if(!contentEl || e.target.closest('.actbtn')) return;
+
+    if(e.shiftKey && anchorNode && anchorCol === contentEl.dataset.col){
+      // Shift+click: keep the existing anchor and just extend the
+      // selection's other end to the click point, same as native
+      // shift+click text selection.
+      e.preventDefault();
+      startSelecting();
+      extendTo(e.clientX, e.clientY);
+      return;
+    }
+
+    // Plain click: start a brand new selection anchored here. Suppress the
+    // browser's own default mousedown selection handling and place the
+    // (initially collapsed) caret ourselves -- if we let it run alongside
+    // our mousemove-driven extension below, the two fight over the
+    // selection during a drag (the native one keeps clipping back to a
+    // single contenteditable line), which is what made a plain drag
+    // intermittently only select one line.
+    e.preventDefault();
+    startSelecting();
+    anchorCol = contentEl.dataset.col;
+    const caret = caretFromPoint(e.clientX, e.clientY);
+    anchorNode = caret ? caret.node : contentEl;
+    anchorOffset = caret ? caret.offset : 0;
+    contentEl.focus({preventScroll:true});
+    const sel = window.getSelection();
+    if(sel){
+      try{ sel.setBaseAndExtent(anchorNode, anchorOffset, anchorNode, anchorOffset); }
+      catch(err){ /* ignore */ }
+    }
+  });
+
+  document.addEventListener('mousemove', (e)=>{
+    if(!isSelecting || !anchorNode) return;
+    const overEl = document.elementFromPoint(e.clientX, e.clientY);
+    const contentEl = overEl && overEl.closest && overEl.closest('.content[contenteditable="true"]');
+    // Only extend the selection while the drag stays within the same
+    // pane/column -- crossing into another pane isn't a meaningful
+    // selection here, so just leave the last valid selection as-is.
+    if(!contentEl || contentEl.dataset.col !== anchorCol) return;
+    extendTo(e.clientX, e.clientY);
+  });
+
+  document.addEventListener('mouseup', ()=>{
+    isSelecting = false;
+    editorWrapEl.classList.remove('is-selecting');
+  });
+})();
+
+/* When a selection spans multiple lines, the DOM range can pass through
+   sibling elements sitting between/after the .content divs -- namely each
+   line's line-number cell and its merge/delete action buttons -- so a
+   plain browser copy would include their glyphs in the clipboard text.
+   Rebuild the copied text from just the .content elements' own text
+   (respecting the exact partial-line boundaries of the selection) instead
+   of trusting the browser's default serialization of the raw DOM range. */
+function closestContentEl(node){
+  if(!node) return null;
+  const el = node.nodeType === 1 ? node : node.parentElement;
+  return el ? el.closest('.content[contenteditable="true"]') : null;
+}
+
+document.getElementById('editor-wrap').addEventListener('copy', (e)=>{
+  const sel = window.getSelection();
+  if(!sel || sel.rangeCount === 0 || sel.isCollapsed) return; // nothing selected; let default copy happen
+  const range = sel.getRangeAt(0);
+
+  const startEl = closestContentEl(range.startContainer);
+  const endEl = closestContentEl(range.endContainer);
+  // Only take over for selections that live inside our editable lines and
+  // stay within a single column; anything else falls back to the browser's
+  // normal copy behavior untouched.
+  if(!startEl || !endEl || startEl.dataset.col !== endEl.dataset.col) return;
+
+  const col = startEl.dataset.col;
+  const container = document.getElementById('lines-' + col);
+  if(!container) return;
+  const allContents = Array.from(container.querySelectorAll('.content[contenteditable="true"]'));
+  const startIdx = allContents.indexOf(startEl);
+  const endIdx = allContents.indexOf(endEl);
+  if(startIdx === -1 || endIdx === -1) return;
+  const lo = Math.min(startIdx, endIdx), hi = Math.max(startIdx, endIdx);
+
+  const lines = [];
+  for(let i = lo; i <= hi; i++){
+    const el = allContents[i];
+    const lineRange = document.createRange();
+    // range.startContainer/endContainer are always in document order
+    // (earlier point first) regardless of which direction the user
+    // dragged, so no extra swapping is needed here.
+    if(i === startIdx) lineRange.setStart(range.startContainer, range.startOffset);
+    else lineRange.setStart(el, 0);
+    if(i === endIdx) lineRange.setEnd(range.endContainer, range.endOffset);
+    else lineRange.setEnd(el, el.childNodes.length);
+    lines.push(lineRange.toString());
+  }
+
+  e.clipboardData.setData('text/plain', lines.join('\n'));
+  e.preventDefault();
 });
 
 /* Click on gutter -> jump to proportional file position
