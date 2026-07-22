@@ -90,6 +90,35 @@
   .pane-scroll::-webkit-scrollbar-track{background:#e5e5e5;}
   .pane-scroll::-webkit-scrollbar-thumb{background:#b0b4bc;border-radius:6px;}
   .pane-scroll::-webkit-scrollbar-thumb:hover{background:#9096a0;}
+  /* Scrollbar end arrow buttons (Chromium/WebKit only). Clicking or holding
+     one nudges the pane by the browser's normal small scroll-button
+     increment, same as a typical OS scrollbar's end arrows. */
+  .pane-scroll::-webkit-scrollbar-button{
+    display:none; /* hidden by default; only the single outer arrow per end is re-enabled below -- */
+    background-color:var(--btn-bg);background-repeat:no-repeat;background-position:center;background-size:8px 8px;
+  }
+  /* -- Chromium normally gives each end BOTH an increment and a decrement
+     button (e.g. an up arrow AND a down arrow stacked at the top). We only
+     want the single arrow that points further outward at each end: the
+     "decrement" (up/left) button at the :start end, and the "increment"
+     (down/right) button at the :end end. */
+  .pane-scroll::-webkit-scrollbar-button:hover{background-color:var(--btn-hover);}
+  .pane-scroll::-webkit-scrollbar-button:vertical:start:decrement{
+    display:block;height:12px;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M5 2L8 7H2Z' fill='%236b6e76'/%3E%3C/svg%3E");
+  }
+  .pane-scroll::-webkit-scrollbar-button:vertical:end:increment{
+    display:block;height:12px;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M5 8L2 3H8Z' fill='%236b6e76'/%3E%3C/svg%3E");
+  }
+  .pane-scroll::-webkit-scrollbar-button:horizontal:start:decrement{
+    display:block;width:12px;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 5L7 2V8Z' fill='%236b6e76'/%3E%3C/svg%3E");
+  }
+  .pane-scroll::-webkit-scrollbar-button:horizontal:end:increment{
+    display:block;width:12px;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M8 5L3 2V8Z' fill='%236b6e76'/%3E%3C/svg%3E");
+  }
 
   .line{
     display:flex;min-height:20px;position:relative;width:100%;
@@ -1834,6 +1863,91 @@ document.getElementById('editor-wrap').addEventListener('focusin', (e)=>{
     state.cursorRow = row;
     state.cursorCol = col;
     state.cursorGapAnchor = null;
+  }
+});
+
+/* ======================================================================
+   Keyboard Up/Down navigation: move the caret to the same horizontal
+   position on the previous/next real (non-gap) line within the same
+   column, since each line is its own separate contenteditable div and
+   the browser has no notion of "the line above" across that boundary.
+   ====================================================================== */
+
+/* Character offset of the caret within el's own text content (counting
+   through any nested spans, e.g. the intra-line diff highlight markup). */
+function getCaretCharOffset(el){
+  const sel = window.getSelection();
+  if(!sel || sel.rangeCount===0) return 0;
+  const range = sel.getRangeAt(0);
+  if(!el.contains(range.startContainer)) return 0;
+  const pre = document.createRange();
+  pre.selectNodeContents(el);
+  pre.setEnd(range.startContainer, range.startOffset);
+  return pre.toString().length;
+}
+
+/* Place the caret at the given character offset within el (clamped to
+   el's text length), walking through any nested text nodes. */
+function setCaretCharOffset(el, offset){
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+  let remaining = offset;
+  let node = walker.nextNode();
+  let target = el, targetOffset = 0;
+  while(node){
+    const len = node.textContent.length;
+    if(remaining <= len){ target = node; targetOffset = remaining; break; }
+    remaining -= len;
+    const next = walker.nextNode();
+    if(!next){ target = node; targetOffset = len; break; } // clamp to end of last text node
+    node = next;
+  }
+  const sel = window.getSelection();
+  if(!sel) return;
+  const range = document.createRange();
+  try{
+    range.setStart(target, targetOffset);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }catch(err){ /* ignore */ }
+}
+
+document.getElementById('editor-wrap').addEventListener('keydown', (e)=>{
+  if(e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  if(e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return; // leave modified combos to default handling
+  const el = e.target.closest && e.target.closest('.content[contenteditable="true"]');
+  if(!el) return;
+
+  const col = el.dataset.col;
+  const container = document.getElementById('lines-' + col);
+  if(!container) return;
+  // Only the real (non-gap) lines in this column have a .content element,
+  // in top-to-bottom order, so stepping through this list already skips
+  // gap markers correctly.
+  const allContents = Array.from(container.querySelectorAll('.content[contenteditable="true"]'));
+  const idx = allContents.indexOf(el);
+  if(idx === -1) return;
+  const targetIdx = e.key==='ArrowDown' ? idx+1 : idx-1;
+  if(targetIdx < 0 || targetIdx >= allContents.length) return; // already at first/last line
+
+  e.preventDefault();
+  const charOffset = getCaretCharOffset(el);
+  const targetEl = allContents[targetIdx];
+  targetEl.focus({preventScroll:true});
+  setCaretCharOffset(targetEl, charOffset);
+
+  // Scroll the target line into view within its own pane only if needed,
+  // without disturbing horizontal scroll position.
+  const paneScroll = container.parentElement;
+  const lineEl = targetEl.closest('.line');
+  if(paneScroll && lineEl){
+    const scrollRect = paneScroll.getBoundingClientRect();
+    const lineRect = lineEl.getBoundingClientRect();
+    if(lineRect.top < scrollRect.top){
+      paneScroll.scrollTop -= (scrollRect.top - lineRect.top);
+    } else if(lineRect.bottom > scrollRect.bottom){
+      paneScroll.scrollTop += (lineRect.bottom - scrollRect.bottom);
+    }
   }
 });
 
