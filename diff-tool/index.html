@@ -1736,14 +1736,33 @@ function setStatus(msg){
    Scroll sync between panes
    ====================================================================== */
 let syncingScroll = false;
+// When we programmatically set another pane's scrollTop/scrollLeft below,
+// the browser still fires that pane's own 'scroll' event -- just
+// asynchronously, after this handler (and its `syncingScroll` guard) has
+// already finished and reset. That echo therefore isn't blocked by
+// `syncingScroll` and re-enters this same logic for that pane, which then
+// pushes new positions back to the others. Away from any add/del gap this
+// is harmless (every column's layout agrees, so the echo computes the same
+// position and nothing actually changes), but right at a gap the columns'
+// layouts disagree (collapsed rows share one offset in the gap's column
+// while the other column still has real height there), so each echo
+// nudges the panes to slightly different positions and they fight over
+// scrollTop instead of settling -- the jitter/stuck feel when scrolling
+// past an added or deleted block. Tracking, per pane, that its very next
+// 'scroll' event is just our own echo (and skipping it instead of
+// re-syncing from it) breaks that loop.
+const ignoreNextScroll = { left:false, mid:false, right:false };
+
 function setupScrollSync(){
   const ids = ['scroll-left','scroll-mid','scroll-right'];
   const idToCol = id => id.slice('scroll-'.length);
   ids.forEach(id=>{
+    const col = idToCol(id);
     document.getElementById(id).addEventListener('scroll', (e)=>{
+      if(ignoreNextScroll[col]){ ignoreNextScroll[col] = false; return; }
       if(syncingScroll) return;
       syncingScroll = true;
-      const srcCol = idToCol(id);
+      const srcCol = col;
       const top = e.target.scrollTop;
       const left = e.target.scrollLeft;
       // Find which row is at this pane's scroll position, then align every
@@ -1757,7 +1776,16 @@ function setupScrollSync(){
           const el = document.getElementById(other);
           if(!el.closest('.pane').classList.contains('hidden')){
             const otherCol = idToCol(other);
-            el.scrollTop = Math.max(0, offsetForRow(otherCol, row) + remainder);
+            const newTop = Math.max(0, offsetForRow(otherCol, row) + remainder);
+            // Only expect (and thus only ignore) an echo if we're actually
+            // changing something -- an unchanged scrollTop/scrollLeft fires
+            // no 'scroll' event at all, so flagging it anyway would leave
+            // the flag stuck and wrongly swallow the pane's next real
+            // user-initiated scroll.
+            if(newTop !== el.scrollTop || left !== el.scrollLeft){
+              ignoreNextScroll[otherCol] = true;
+            }
+            el.scrollTop = newTop;
             el.scrollLeft = left; // Sync horizontal scroll too, to make diff comparison easier
           }
         }
