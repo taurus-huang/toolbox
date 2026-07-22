@@ -721,6 +721,7 @@ function buildPairBlocks(colA, colB){
 
 function recompute(opts){
   const keepView = !!(opts && opts.keepView);
+  const restoreCaret = opts && opts.restoreCaret;
   let savedScroll = null;
   if(keepView){
     savedScroll = {};
@@ -764,6 +765,22 @@ function recompute(opts){
   } else if(state.diffBlocks.length){
     // If there are diffs, scroll to the first diff by default
     scrollToRow(state.diffBlocks[0].start);
+  }
+
+  // After an in-place edit, render() just rebuilt the whole DOM (including
+  // the line the user was typing in), which drops focus/caret entirely.
+  // Re-find that same source line by its stable file-line index (its
+  // unified row position may have shifted after the re-diff) and put the
+  // caret back where it was, so editing doesn't keep bumping the user out
+  // of the line they're actively working on.
+  if(restoreCaret && restoreCaret.lineIdx !== null && restoreCaret.lineIdx !== undefined){
+    const target = document.querySelector(
+      `.content[data-col="${restoreCaret.col}"][data-line-idx="${restoreCaret.lineIdx}"]`
+    );
+    if(target){
+      target.focus({preventScroll:true});
+      setCaretCharOffset(target, restoreCaret.offset);
+    }
   }
 }
 
@@ -1073,7 +1090,7 @@ function renderColumn(col){
 
     html += `<div class="${lineClasses}" data-row="${i}" data-col="${col}">`
           + `<div class="num">${lineNum}</div>`
-          + `<div class="content" contenteditable="${editable}" spellcheck="false" data-row="${i}" data-col="${col}">${content}</div>`
+          + `<div class="content" contenteditable="${editable}" spellcheck="false" data-row="${i}" data-col="${col}" data-line-idx="${cell.idx}">${content}</div>`
           + actionsHtml
           + `</div>`;
   }
@@ -1447,8 +1464,21 @@ function onContentInput(e){
   const col = e.target.dataset.col;
   if(editDebounce) clearTimeout(editDebounce);
   editDebounce = setTimeout(()=>{
+    // Capture where the caret actually is once typing pauses (not on every
+    // keystroke), so the re-diff/re-render this triggers can put the caret
+    // back afterward instead of the view jumping to the first diff and the
+    // user losing their place.
+    const focusEl = document.activeElement;
+    let restoreCaret = null;
+    if(focusEl && focusEl.classList && focusEl.classList.contains('content') && focusEl.dataset.col === col){
+      const row = parseInt(focusEl.dataset.row, 10);
+      const cell = !Number.isNaN(row) && state.rows[row] ? state.rows[row][col] : null;
+      if(cell){
+        restoreCaret = { col, lineIdx: cell.idx, offset: getCaretCharOffset(focusEl) };
+      }
+    }
     commitColumnEdits(col);
-    recompute();
+    recompute({keepView:true, restoreCaret});
   }, 600);
 }
 
