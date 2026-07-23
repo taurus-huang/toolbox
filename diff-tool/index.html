@@ -1313,19 +1313,35 @@ function renderConnectors(){
   }
 }
 
-/* Update the viewport indicator rectangle on all visible gutters */
+/* Update the viewport indicator rectangle on all visible gutters.
+   Each gutter's markers (drawn in renderOneGutter) are measured against
+   its own ownCol's real pixel layout (state.colLayout[ownCol]), so the
+   viewport rectangle must use that exact same coordinate system -- its
+   own column's totalHeight, and the scroll position/viewport height of
+   that column's own scroll pane -- rather than a single generic
+   totalRows*LINE_H estimate driven only by the left pane's scroll.
+   gutter-lm-track always sits beside (and is measured against) the left
+   pane; gutter-mr-track always sits beside the right pane, in both 2-way
+   and 3-way modes (see the ownCol args passed in renderGutters). */
 function updateGutterViewport(){
-  const scrollEl = document.getElementById('scroll-left');
-  const totalRows = state.rows.length;
-  const totalFileH = Math.max(totalRows * LINE_H, 1);
-  const scrollTop  = scrollEl.scrollTop;
-  const viewH      = scrollEl.clientHeight;
+  const gutters = [
+    { trackId:'gutter-lm-track', ownCol:'left',  scrollId:'scroll-left'  },
+    { trackId:'gutter-mr-track', ownCol:'right', scrollId:'scroll-right' },
+  ];
 
-  ['gutter-lm-track','gutter-mr-track'].forEach(trackId=>{
+  gutters.forEach(({trackId, ownCol, scrollId})=>{
     const vp = document.getElementById(trackId+'-vp');
     if(!vp) return;
+    const scrollEl = document.getElementById(scrollId);
     const gutterEl = document.getElementById(trackId).parentElement;
-    const gutterH  = gutterEl.offsetHeight || 400;
+    if(!scrollEl || !gutterEl) return;
+
+    const layout = state.colLayout && state.colLayout[ownCol];
+    const totalFileH = Math.max((layout && layout.totalHeight) || 0, 1);
+    const scrollTop = scrollEl.scrollTop;
+    const viewH     = scrollEl.clientHeight;
+    const gutterH   = gutterEl.offsetHeight || 400;
+
     const top    = (scrollTop / totalFileH) * gutterH;
     const height = Math.max(4, (viewH / totalFileH) * gutterH);
     vp.style.top    = top.toFixed(1) + 'px';
@@ -1605,13 +1621,22 @@ function deleteBlock(rowIdx, col){
       lastIdx=cell.idx;
     }
   }
+  let restoreCaret = null;
   if(firstIdx!==null){
     const destLines = state.cols[col].lines.slice();
     destLines.splice(firstIdx, lastIdx-firstIdx+1);
     pushHistory(col);
     state.cols[col].text = destLines.join('\n');
+    // Put the caret at the line now sitting where the deleted block used
+    // to start (i.e. the line that shifted up into that spot), or the
+    // nearest remaining line if the deletion emptied the tail/whole file,
+    // so focus lands right at the delete location instead of drifting.
+    const targetIdx = destLines.length
+      ? Math.max(0, Math.min(firstIdx, destLines.length-1))
+      : null;
+    restoreCaret = targetIdx===null ? null : {col, lineIdx:targetIdx, offset:0};
   }
-  recompute({keepView:true});
+  recompute({keepView:true, restoreCaret});
   setStatus(`Deleted diff block from ${colLabel(col)}`);
 }
 
