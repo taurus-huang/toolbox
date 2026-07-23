@@ -45,10 +45,10 @@
     display:flex;align-items:center;gap:5px;white-space:nowrap;
     transition:background .12s;
   }
-  .tbtn:hover{background:var(--btn-hover);}
-  .tbtn:active{background:var(--accent);}
+  .tbtn:not(:disabled):hover{background:var(--btn-hover);}
+  .tbtn:not(:disabled):active{background:var(--accent);}
   .tbtn.active{background:var(--accent);border-color:var(--accent);color:#fff;}
-  .tbtn:disabled{opacity:.4;cursor:default;}
+  .tbtn:disabled{opacity:.4;cursor:default;pointer-events:none;}
   .tbtn .ico{font-size:14px;line-height:1;}
 
   /* Path bar */
@@ -655,19 +655,39 @@ function classifyRow(row, mode){
   }
 }
 
-/* Build diff blocks: consecutive rows where anyDiff is true, grouped */
+/* A compact signature of a row's per-column diff classification, used to
+   detect when buildDiffBlocks should start a new block even though
+   `anyDiff` has stayed continuously true -- e.g. a "modified" line
+   immediately followed by a "deleted" line are both part of one
+   contiguous non-equal run, but they're a different kind of change and
+   should count as two separate diffs, not one. */
+function diffSignature(cls){
+  return cls.left + '|' + cls.mid + '|' + cls.right;
+}
+
+/* Build diff blocks: consecutive rows where anyDiff is true AND the diff
+   signature stays the same are grouped into one block; a change in
+   signature (e.g. mod -> del) starts a new block even without an
+   intervening equal row. */
 function buildDiffBlocks(){
   const blocks = [];
   let cur = null;
+  let curSig = null;
   for(let i=0;i<state.rows.length;i++){
     const row = state.rows[i];
     const cls = classifyRow(row, state.mode);
     row._cls = cls;
     if(cls.anyDiff){
-      if(!cur) cur = {start:i, end:i};
-      else cur.end = i;
+      const sig = diffSignature(cls);
+      if(cur && sig===curSig){
+        cur.end = i;
+      } else {
+        if(cur) blocks.push(cur);
+        cur = {start:i, end:i};
+        curSig = sig;
+      }
     } else {
-      if(cur){ blocks.push(cur); cur=null; }
+      if(cur){ blocks.push(cur); cur=null; curSig=null; }
     }
   }
   if(cur) blocks.push(cur);
@@ -782,6 +802,41 @@ function recompute(opts){
       setCaretCharOffset(target, restoreCaret.offset);
     }
   }
+
+  updateEditButtonStates();
+}
+
+/* Keep the undo/redo buttons in sync: disabled whenever there's nothing
+   to undo/redo for that column (including right after loading a file,
+   since loading resets the history). */
+function updateEditButtonStates(){
+  ['left','mid','right'].forEach(col=>{
+    const c = state.cols[col];
+    const undoBtn = document.querySelector(`.tbtn[data-act="undo"][data-col="${col}"]`);
+    const redoBtn = document.querySelector(`.tbtn[data-act="redo"][data-col="${col}"]`);
+    if(undoBtn) undoBtn.disabled = !c || c.history.length===0;
+    if(redoBtn) redoBtn.disabled = !c || c.future.length===0;
+  });
+}
+
+/* Keep the first/prev/next/last diff-navigation buttons in sync with the
+   current cursor position (the same position goToDiff's own 'next'/'prev'
+   already navigate relative to): First/Prev are disabled once the cursor
+   is at or before the first diff (there's nothing earlier left to jump
+   to), and Last/Next are disabled once it's at or after the last diff. */
+function updateDiffNavButtonStates(){
+  const total = state.diffBlocks.length;
+  const cursor = getCursorPosition();
+  const prevExists = total>0 && state.diffBlocks.some(b => b.end < cursor.row);
+  const nextExists = total>0 && state.diffBlocks.some(b => b.start > cursor.row);
+  const firstBtn = document.getElementById('nav-first');
+  const prevBtn = document.getElementById('nav-prev');
+  const nextBtn = document.getElementById('nav-next');
+  const lastBtn = document.getElementById('nav-last');
+  if(firstBtn) firstBtn.disabled = !prevExists;
+  if(prevBtn) prevBtn.disabled = !prevExists;
+  if(nextBtn) nextBtn.disabled = !nextExists;
+  if(lastBtn) lastBtn.disabled = !nextExists;
 }
 
 function escapeHtml(str){
@@ -1288,6 +1343,7 @@ function updateDiffCounter(){
   const total = state.diffBlocks.length;
   const cur = total ? state.currentDiffIndex + 1 : 0;
   document.getElementById('diff-counter').textContent = `Diff: ${cur} / ${total}`;
+  updateDiffNavButtonStates();
 }
 
 function scrollToRow(rowIdx){
@@ -1301,6 +1357,23 @@ function scrollToRow(rowIdx){
     el.scrollTop = Math.max(0, center);
   }
   updateGutterViewport();
+}
+
+/* True if the given block's whole row range is already within the
+   current visible scroll viewport of every active pane -- if so, jumping
+   to it shouldn't re-scroll the view (only move the caret there). */
+function isBlockFullyVisible(block){
+  const scrollers = state.mode==='3way'
+    ? [['scroll-left','left'],['scroll-mid','mid'],['scroll-right','right']]
+    : [['scroll-left','left'],['scroll-right','right']];
+  for(const [id,col] of scrollers){
+    const el = document.getElementById(id);
+    if(!el) continue;
+    const top = offsetForRow(col, block.start);
+    const bottom = rowBottomOffset(col, block.end);
+    if(top < el.scrollTop || bottom > el.scrollTop + el.clientHeight) return false;
+  }
+  return true;
 }
 
 /* First real (non-gap-marker) row of a block for a given column, or null
@@ -1398,7 +1471,14 @@ function goToDiff(target){
   }
 
   render();
-  scrollToRow(focusRow);
+  if(!isBlockFullyVisible(block)){
+    scrollToRow(focusRow);
+  } else {
+    // Already fully in view: leave the scroll position alone, but the
+    // gutter's "current viewport" indicator still needs to reflect this
+    // render pass.
+    updateGutterViewport();
+  }
   focusCursorAt(focusRow, focusCol);
   state.cursorRow = focusRow;
   state.cursorCol = focusCol;
@@ -1438,6 +1518,16 @@ function pushHistory(col){
   const c = state.cols[col];
   c.history.push(c.text);
   if(c.history.length>200) c.history.shift();
+  c.future = [];
+}
+
+/* Loading a file into a column (open/drag-drop/refresh) is a fresh start,
+   not an editable action -- clear the undo/redo history instead of
+   pushing into it, so the undo/redo buttons come back up disabled right
+   after a load, same as the very first, empty state. */
+function resetHistory(col){
+  const c = state.cols[col];
+  c.history = [];
   c.future = [];
 }
 
@@ -1609,7 +1699,7 @@ async function openFile(col){
       const [handle] = await window.showOpenFilePicker({ multiple:false });
       const file = await handle.getFile();
       const text = await file.text();
-      pushHistory(col);
+      resetHistory(col);
       state.cols[col].text = text;
       state.cols[col].fullPath = file.name;
       state.cols[col].userLoaded = true;
@@ -1636,7 +1726,7 @@ document.getElementById('file-input').addEventListener('change', (e)=>{
   const reader = new FileReader();
   reader.onload = ()=>{
     const col = fileInputTargetCol;
-    pushHistory(col);
+    resetHistory(col);
     state.cols[col].text = reader.result;
     // Store full path: use webkitRelativePath if available, else just name
     const fullPath = file.webkitRelativePath || file.name;
@@ -1699,7 +1789,7 @@ async function refreshFile(col){
       setStatus(`${colLabel(col)}: no changes on disk`);
       return;
     }
-    pushHistory(col);
+    resetHistory(col);
     c.text = text;
     recompute();
     setStatus(`Refreshed ${colLabel(col)} from disk: ${file.name}`);
@@ -1757,7 +1847,7 @@ async function getAllDroppedFiles(dt){
 
 async function loadFileIntoColumn(col, file, handle){
   const text = await file.text();
-  pushHistory(col);
+  resetHistory(col);
   state.cols[col].text = text;
   state.cols[col].fullPath = file.webkitRelativePath || file.name;
   state.cols[col].userLoaded = true;
@@ -2005,6 +2095,7 @@ document.getElementById('editor-wrap').addEventListener('focusin', (e)=>{
     state.cursorRow = row;
     state.cursorCol = col;
     state.cursorGapAnchor = null;
+    updateDiffNavButtonStates();
   }
 });
 
