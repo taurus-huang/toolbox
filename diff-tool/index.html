@@ -959,18 +959,56 @@ function renderColumn(col){
   const hasLeftPane = (col!=='left'); // is there a pane to the left of this one
   const hasRightPane = (col!=='right'); // is there a pane to the right of this one
 
-  // Row indices that are the first/last row of a contiguous diff block
-  // (state.diffBlocks is shared across all columns), used to draw a
-  // boundary line only at the top/bottom edge of each diff area.
-  const blockStartRows = new Set(state.diffBlocks.map(b=>b.start));
-  const blockEndRows = new Set(state.diffBlocks.map(b=>b.end));
+  // Row indices that are the first/last row of a contiguous same-status
+  // "segment" for THIS column specifically (mirrors findSegmentForRow),
+  // used to draw a colored boundary line only at the top/bottom edge of
+  // each diff area. state.diffBlocks groups rows by whether ANY column
+  // differs, so a single diffBlock can still contain more than one of
+  // these segments back-to-back for a given column (e.g. a "modified"
+  // line immediately followed by a "deleted" line) -- each such internal
+  // transition needs its own boundary line too, not just the outer edges
+  // of the whole enclosing block.
+  //
+  // A boundary line is only drawn on a REAL (non-gap) row when the
+  // neighboring segment is ALSO a real row of a different type -- there's
+  // room there for both rows' own lines to show side by side (e.g. a
+  // yellow line under the "modified" row and a green line above the
+  // following "added" row). When the neighboring segment is instead a
+  // collapsed zero-height gap marker, there's no room for a second line
+  // right at that seam, so the row's own line is skipped there and the
+  // gap marker's own colored line (always drawn regardless of position)
+  // is left as the sole boundary indicator.
+  const blockStartRows = new Set();
+  const blockEndRows = new Set();
+  {
+    const rows = state.rows;
+    const statusAt = i => {
+      const r = rows[i];
+      return (r && r._cls) ? r._cls[col] : 'equal';
+    };
+    const isGapNeighbor = i => !!(rows[i] && !rows[i][col]);
+    for(let i=0;i<rows.length;i++){
+      const s = statusAt(i);
+      if(s==='equal') continue;
+      if(!rows[i][col]) continue; // this row itself is a gap marker, handled by its own unconditional colored line
+      if(statusAt(i-1) !== s && !isGapNeighbor(i-1)) blockStartRows.add(i);
+      if(statusAt(i+1) !== s && !isGapNeighbor(i+1)) blockEndRows.add(i);
+    }
+  }
 
   // Consecutive gap rows (add/del) for this column collapse into a single
   // thin marker line rendered between the two real lines that surround them,
   // instead of one blank numbered row per gap.
   let pendingGap = null; // {type:'add'|'del', current:boolean, rowIdx:number, leftHasContent:boolean, rightHasContent:boolean, showButton:boolean, blockStart:boolean, blockEnd:boolean}
-  // Only show one merge/delete button set per contiguous diff block, not one per line.
+  // Only show one merge/delete button set per contiguous same-type diff
+  // segment. A single overall diffBlock can still contain more than one of
+  // these segments back-to-back (e.g. a "modified" line immediately
+  // followed by a "deleted" line, both part of the same contiguous
+  // anyDiff run) -- lastRunStatus lets us notice that type change and
+  // start a fresh button set for it, instead of only ever showing one
+  // button set for the whole block.
   let shownButtonForRun = false;
+  let lastRunStatus = null;
   const flushGap = () => {
     if(!pendingGap) return;
     const typeCls = pendingGap.type==='add' ? 'diff-add' : 'diff-del';
@@ -1009,17 +1047,25 @@ function renderColumn(col){
       // Left the current diff block (back to an unchanged row); the next
       // diff block encountered should get its own button set.
       shownButtonForRun = false;
+      lastRunStatus = null;
     }
 
     if(!cell){
       // Gap row: accumulate into the pending marker instead of rendering a blank line
       if(status==='add' || status==='del'){
         if(!pendingGap){
+          if(status !== lastRunStatus){
+            // Type changed since the last segment (e.g. right after a
+            // "modified" real line) -- this gap starts a new visual
+            // segment of its own and should get its own button set.
+            shownButtonForRun = false;
+          }
           pendingGap = {type:status, current:false, rowIdx:i, leftHasContent:false, rightHasContent:false, showButton: !shownButtonForRun, blockStart:false, blockEnd:false};
           if(pendingGap.showButton) shownButtonForRun = true;
         } else {
           pendingGap.type = status;
         }
+        lastRunStatus = status;
         if(isCurrent) pendingGap.current = true;
         if(row.left) pendingGap.leftHasContent = true;
         if(row.right) pendingGap.rightHasContent = true;
@@ -1077,15 +1123,24 @@ function renderColumn(col){
     if(blockStartRows.has(i)) lineClasses += ' diff-block-start';
     if(blockEndRows.has(i)) lineClasses += ' diff-block-end';
 
-    if(cls && cls.anyDiff && !shownButtonForRun){
-      let effHasLeftPane = hasLeftPane;
-      let effHasRightPane = hasRightPane;
-      if(col==='mid'){
-        if(cls.left==='equal') effHasLeftPane = false;
-        if(cls.right==='equal') effHasRightPane = false;
+    if(cls && cls.anyDiff){
+      if(status !== 'equal' && status !== lastRunStatus){
+        // Type changed since the last segment (e.g. this "modified" line
+        // comes right after a "deleted" gap) -- it starts a new visual
+        // segment of its own and should get its own button set.
+        shownButtonForRun = false;
       }
-      actionsHtml = buildActionButtons(i, col, effHasLeftPane, effHasRightPane);
-      shownButtonForRun = true;
+      if(!shownButtonForRun){
+        let effHasLeftPane = hasLeftPane;
+        let effHasRightPane = hasRightPane;
+        if(col==='mid'){
+          if(cls.left==='equal') effHasLeftPane = false;
+          if(cls.right==='equal') effHasRightPane = false;
+        }
+        actionsHtml = buildActionButtons(i, col, effHasLeftPane, effHasRightPane);
+        shownButtonForRun = true;
+      }
+      if(status !== 'equal') lastRunStatus = status;
     }
 
     html += `<div class="${lineClasses}" data-row="${i}" data-col="${col}">`
@@ -1356,11 +1411,27 @@ function goToDiff(target){
    Merge / Delete actions
    ====================================================================== */
 
-function findBlockForRow(rowIdx){
-  for(const b of state.diffBlocks){
-    if(rowIdx>=b.start && rowIdx<=b.end) return b;
-  }
-  return {start:rowIdx, end:rowIdx};
+/* Find the contiguous range of rows around rowIdx that share the same
+   diff status for the given column -- this mirrors how renderColumn
+   decides where to draw each separate button set. state.diffBlocks groups
+   rows by whether ANY column differs, so a single diffBlock can contain
+   more than one of these same-status segments back to back (e.g. a
+   "modified" segment immediately followed by a "deleted" segment for this
+   column). Each button set must act only on its own segment, not the
+   whole enclosing diffBlock, or two different-looking buttons would end
+   up doing the exact same merge/delete. */
+function findSegmentForRow(rowIdx, col){
+  const rows = state.rows;
+  const statusAt = i => {
+    const r = rows[i];
+    return (r && r._cls) ? r._cls[col] : 'equal';
+  };
+  const status = statusAt(rowIdx);
+  if(status === 'equal') return {start:rowIdx, end:rowIdx};
+  let start = rowIdx, end = rowIdx;
+  while(start > 0 && statusAt(start-1) === status) start--;
+  while(end < rows.length-1 && statusAt(end+1) === status) end++;
+  return {start, end};
 }
 
 function pushHistory(col){
@@ -1384,7 +1455,7 @@ function getBlockLines(block, col){
 /* Replace the destination column's text region corresponding to the block
    with the source column's lines for that block. */
 function mergeBlock(rowIdx, fromCol, toCol){
-  const block = findBlockForRow(rowIdx);
+  const block = findSegmentForRow(rowIdx, fromCol);
   const srcLines = getBlockLines(block, fromCol);
 
   // Determine destination splice range in toCol.lines:
@@ -1399,6 +1470,7 @@ function mergeBlock(rowIdx, fromCol, toCol){
   }
 
   const destLines = state.cols[toCol].lines.slice();
+  let writeStart;
   if(firstIdx===null){
     // destination has no lines in this block (pure insertion) -> need to find insertion point
     // find nearest preceding row that has a cell in toCol
@@ -1408,21 +1480,33 @@ function mergeBlock(rowIdx, fromCol, toCol){
       if(cell){ insertAt = cell.idx+1; break; }
     }
     if(block.start===0) insertAt = 0;
+    writeStart = insertAt;
     destLines.splice(insertAt, 0, ...srcLines);
   } else {
+    writeStart = firstIdx;
     destLines.splice(firstIdx, lastIdx-firstIdx+1, ...srcLines);
   }
 
   pushHistory(toCol);
   state.cols[toCol].text = destLines.join('\n');
-  recompute({keepView:true});
+
+  // Land the caret on the merged-into side, at the line that was just
+  // written there (or, when the merge cleared the block entirely -- e.g.
+  // merging a pure deletion across -- the line now sitting in that spot),
+  // instead of leaving focus wherever it happened to be before the merge.
+  const targetIdx = destLines.length
+    ? Math.max(0, Math.min(writeStart, destLines.length-1))
+    : null;
+  const restoreCaret = targetIdx===null ? null : {col:toCol, lineIdx:targetIdx, offset:0};
+
+  recompute({keepView:true, restoreCaret});
   setStatus(`Merged ${colLabel(fromCol)} → ${colLabel(toCol)}`);
 }
 
 /* Delete the diff block only from the clicked column (col argument).
    Lines belonging to that block in that column are removed; other columns untouched. */
 function deleteBlock(rowIdx, col){
-  const block = findBlockForRow(rowIdx);
+  const block = findSegmentForRow(rowIdx, col);
   let firstIdx=null, lastIdx=null;
   for(let i=block.start;i<=block.end;i++){
     const cell = state.rows[i][col];
