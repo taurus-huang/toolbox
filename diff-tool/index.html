@@ -2093,6 +2093,72 @@ document.getElementById('editor-wrap').addEventListener('keydown', (e)=>{
   }
 });
 
+/* ======================================================================
+   Delete-at-end-of-line / Backspace-at-start-of-line: each line is its
+   own separate contenteditable div (see renderColumn), so by default
+   there's nothing on the other side of the div boundary for these keys to
+   reach across -- pressing Delete at the end of a line or Backspace at
+   the start of one would otherwise just do nothing. Handle both here so
+   they behave like a normal text editor: merge this line with the
+   neighboring one in the same column, dropping the newline between them.
+   ====================================================================== */
+
+/* Merge the line at index firstIdx with the line right after it
+   (firstIdx+1) in the given column, placing the caret at the join point.
+   Used for both Delete (firstIdx = current line) and Backspace
+   (firstIdx = previous line) since both collapse the same pair of lines. */
+function mergeLinesInColumn(col, firstIdx){
+  const container = document.getElementById('lines-' + col);
+  if(!container) return;
+  // Pull every line's LIVE (possibly not-yet-committed) text straight from
+  // the DOM -- same approach as commitColumnEdits -- so this still works
+  // correctly if the user is mid-edit and the background commit debounce
+  // for this column hasn't fired yet.
+  const lineEls = container.querySelectorAll('.line:not(.empty) .content[contenteditable="true"]');
+  const liveLines = [];
+  lineEls.forEach(el=>{ liveLines[+el.dataset.lineIdx] = el.textContent.replace(/\r/g, ''); });
+
+  if(firstIdx < 0 || firstIdx+1 >= liveLines.length) return; // nothing on the other side to merge with
+
+  // A pending debounced commit from ordinary typing is now superseded by
+  // this merge (which already reads the live, up-to-the-moment text) --
+  // cancel it so it doesn't redundantly re-fire and re-render afterward.
+  if(editDebounce){ clearTimeout(editDebounce); editDebounce = null; }
+
+  const firstLen = liveLines[firstIdx].length;
+  const merged = liveLines[firstIdx] + liveLines[firstIdx+1];
+  liveLines.splice(firstIdx, 2, merged);
+
+  pushHistory(col);
+  state.cols[col].text = liveLines.join('\n');
+  recompute({keepView:true, restoreCaret:{col, lineIdx:firstIdx, offset:firstLen}});
+}
+
+document.getElementById('editor-wrap').addEventListener('keydown', (e)=>{
+  if(e.key !== 'Delete' && e.key !== 'Backspace') return;
+  if(e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return; // leave modified combos (e.g. word-delete) to default handling
+  const el = e.target.closest && e.target.closest('.content[contenteditable="true"]');
+  if(!el) return;
+
+  const sel = window.getSelection();
+  if(!sel || sel.rangeCount===0 || !sel.isCollapsed) return; // an actual selection: let the browser's normal delete-selection behavior run
+
+  const col = el.dataset.col;
+  const lineIdx = parseInt(el.dataset.lineIdx, 10);
+  if(Number.isNaN(lineIdx)) return;
+
+  const caretOffset = getCaretCharOffset(el);
+  const textLen = el.textContent.length;
+
+  if(e.key === 'Delete' && caretOffset === textLen){
+    e.preventDefault();
+    mergeLinesInColumn(col, lineIdx);
+  } else if(e.key === 'Backspace' && caretOffset === 0 && lineIdx > 0){
+    e.preventDefault();
+    mergeLinesInColumn(col, lineIdx-1);
+  }
+});
+
 /* Multi-line text selection: each line is rendered as its own separate
    contenteditable div (see renderColumn), which browsers treat as an
    editing boundary during a native mouse drag -- dragging from one line
