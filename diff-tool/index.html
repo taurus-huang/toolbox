@@ -59,9 +59,22 @@
   .pathrow{display:flex;align-items:center;}
   .pathrow .col-label{
     flex:1;display:flex;align-items:center;gap:4px;
-    padding:4px 6px;border-right:1px solid var(--border);min-width:0;
+    padding:4px 6px;min-width:0;
   }
-  .pathrow .col-label:last-child{border-right:none;}
+  /* The editor area below has 30px gutters on the outer edges and 24px
+     connector strips between panes, neither of which this path row
+     reproduces (it uses a single 40px swap-cell as its only divider
+     instead, and no outer spacer at all). Solving for where the swap-cell
+     needs to sit so its center lines up with the connector's center below
+     it works out to a constant 38px of extra width on the left/right
+     cells over the middle cell (mid keeps flex-basis 0 from the `flex:1`
+     shorthand above), independent of the row's actual pixel width -- so
+     it stays correct at any window size. This has no effect in 2-way
+     mode, where left/right are the only two cells and an identical extra
+     offset on both just cancels out. */
+  .pathrow .col-label:not(#pathcol-mid){
+    flex-basis:38px;
+  }
   .pathrow input[type=text]{
     flex:1;background:#f8f9fb;border:1px solid var(--border);color:var(--text);
     padding:4px 6px;border-radius:3px;font-size:12px;min-width:0;
@@ -73,6 +86,22 @@
   }
   .pathrow .filebtns{display:flex;gap:2px;flex-shrink:0;}
   .pathrow .filebtns .tbtn{padding:4px 7px;}
+  /* This cell IS the visual divider strip between two column cells -- its
+     own left/right borders are the sole boundary line (col-label no longer
+     draws one, to avoid a doubled-up line right next to this). Widened so
+     the button inside has clear breathing room on every side, same as any
+     other toolbar button, instead of filling the cell edge-to-edge. */
+  .pathrow .swap-cell{
+    flex-shrink:0;width:40px;align-self:stretch;
+    background:#E8EAEE;border-left:1px solid var(--border);border-right:1px solid var(--border);
+    display:flex;align-items:center;justify-content:center;
+  }
+  .pathrow .swap-btn{
+    background:var(--btn-bg);border:1px solid var(--border);color:var(--text);
+    border-radius:4px;cursor:pointer;font-size:13px;padding:4px 7px;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .pathrow .swap-btn:hover{background:var(--btn-hover);}
 
   /* Main editor area */
   .editor-wrap{flex:1;display:flex;overflow:hidden;position:relative;}
@@ -332,9 +361,6 @@
     <button class="tbtn" id="nav-last" title="Last difference">⏬ Last</button>
   </div>
   <div class="group">
-    <span id="diff-counter" style="color:var(--muted);font-size:12px;">Diff: 0 / 0</span>
-  </div>
-  <div class="group">
     <button class="tbtn" id="btn-recompute" title="Re-run diff">🔄 Re-diff</button>
   </div>
 </div>
@@ -352,6 +378,12 @@
         <button class="tbtn" data-act="save" data-col="left" title="Save">💾</button>
       </div>
     </div>
+    <div class="swap-cell" id="swapcell-left-mid">
+      <button class="swap-btn" data-swap-a="left" data-swap-b="mid" title="Swap left and middle files">↔️</button>
+    </div>
+    <div class="swap-cell" id="swapcell-left-right-2way">
+      <button class="swap-btn" data-swap-a="left" data-swap-b="right" title="Swap left and right files">↔️</button>
+    </div>
     <div class="col-label" id="pathcol-mid">
       <input type="text" id="path-mid" placeholder="Middle file path..." readonly>
       <div class="filebtns">
@@ -361,6 +393,9 @@
         <button class="tbtn" data-act="open" data-col="mid" title="Open">📂</button>
         <button class="tbtn" data-act="save" data-col="mid" title="Save">💾</button>
       </div>
+    </div>
+    <div class="swap-cell" id="swapcell-mid-right">
+      <button class="swap-btn" data-swap-a="mid" data-swap-b="right" title="Swap middle and right files">↔️</button>
     </div>
     <div class="col-label">
       <input type="text" id="path-right" placeholder="Right file path..." readonly>
@@ -399,6 +434,7 @@
     <span><span class="swatch mod"></span> Modified</span>
     <span><span class="swatch add"></span> Added</span>
     <span><span class="swatch del"></span> Deleted</span>
+    <span id="diff-counter">Diff: 0 / 0</span>
   </div>
   <div id="status-text">Ready</div>
 </div>
@@ -913,6 +949,9 @@ function render(){
   document.getElementById('gutter-lm').classList.toggle('hidden', false);
   document.getElementById('gutter-mr').classList.toggle('hidden', false);
   document.getElementById('connector-mr').classList.toggle('hidden', mode!=='3way');
+  document.getElementById('swapcell-left-mid').classList.toggle('hidden', mode!=='3way');
+  document.getElementById('swapcell-mid-right').classList.toggle('hidden', mode!=='3way');
+  document.getElementById('swapcell-left-right-2way').classList.toggle('hidden', mode==='3way');
 
   renderColumn('left');
   if(mode==='3way') renderColumn('mid');
@@ -1703,6 +1742,18 @@ function redo(col){
 }
 function colLabel(col){ return col==='left'?'Left':col==='mid'?'Middle':'Right'; }
 
+/* Swap two columns' entire contents (text, undo/redo history, loaded file
+   path/handle, etc.) -- used by the ↔️ buttons in the path row. */
+function swapColumns(colA, colB){
+  const tmp = state.cols[colA];
+  state.cols[colA] = state.cols[colB];
+  state.cols[colB] = tmp;
+  syncPathInput(colA);
+  syncPathInput(colB);
+  recompute();
+  setStatus(`Swapped ${colLabel(colA)} ↔ ${colLabel(colB)}`);
+}
+
 /* ======================================================================
    File Open / Save / Refresh
    ====================================================================== */
@@ -2077,6 +2128,12 @@ document.querySelectorAll('.pathrow .filebtns .tbtn').forEach(btn=>{
     else if(act==='refresh') refreshFile(col);
     else if(act==='open') openFile(col);
     else if(act==='save') saveFile(col);
+  });
+});
+
+document.querySelectorAll('.pathrow .swap-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    swapColumns(btn.dataset.swapA, btn.dataset.swapB);
   });
 });
 
