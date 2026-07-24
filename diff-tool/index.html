@@ -187,6 +187,7 @@
   }
   .gap-line.diff-add::after{background:var(--diff-add-border);}
   .gap-line.diff-del::after{background:var(--diff-del-border);}
+  .gap-line.diff-mod::after{background:var(--diff-mod-border);}
   .gap-line .actions{
     position:sticky;right:4px;margin-left:auto;height:20px;display:flex;
     align-items:center;gap:3px;z-index:6;flex-shrink:0;
@@ -701,33 +702,93 @@ function diffSignature(cls){
   return cls.left + '|' + cls.mid + '|' + cls.right;
 }
 
+/* The overall "kind" of a row's diff classification, ignoring 'equal'
+   columns: 'mod'/'add'/'del' if every non-equal column agrees on that
+   one kind, 'mixed' if they disagree (e.g. 3-way rows where one side is
+   modified and the other is a genuine add/del), or 'equal'. Used by
+   buildDiffBlocks to recognize a mod<->add or mod<->del transition
+   specifically (as opposed to any other signature change). */
+function rowKind(cls){
+  const vals = new Set();
+  ['left','mid','right'].forEach(k=>{
+    if(cls[k] !== undefined && cls[k] !== 'equal') vals.add(cls[k]);
+  });
+  if(vals.size === 0) return 'equal';
+  if(vals.size === 1) return [...vals][0];
+  return 'mixed';
+}
+
 /* Build diff blocks: consecutive rows where anyDiff is true AND the diff
    signature stays the same are grouped into one block; a change in
    signature (e.g. mod -> del) starts a new block even without an
-   intervening equal row. */
+   intervening equal row -- EXCEPT when a 'mod' row directly borders an
+   'add' or 'del' row (no equal row between them), which stays part of
+   the same block instead: a modification immediately next to an
+   insertion/removal is treated as one combined diff for navigation,
+   counting, and gutter-marker click targeting. */
 function buildDiffBlocks(){
   const blocks = [];
   let cur = null;
   let curSig = null;
+  let curKind = null;
   for(let i=0;i<state.rows.length;i++){
     const row = state.rows[i];
     const cls = classifyRow(row, state.mode);
     row._cls = cls;
     if(cls.anyDiff){
       const sig = diffSignature(cls);
-      if(cur && sig===curSig){
+      const kind = rowKind(cls);
+      const modBordersAddDel = cur && kind!=='mixed' && curKind!=='mixed' &&
+        ((curKind==='mod' && (kind==='add'||kind==='del')) ||
+         (kind==='mod' && (curKind==='add'||curKind==='del')));
+      if(cur && (sig===curSig || modBordersAddDel)){
         cur.end = i;
+        curSig = sig;
+        curKind = kind;
       } else {
         if(cur) blocks.push(cur);
         cur = {start:i, end:i};
         curSig = sig;
+        curKind = kind;
       }
     } else {
-      if(cur){ blocks.push(cur); cur=null; curSig=null; }
+      if(cur){ blocks.push(cur); cur=null; curSig=null; curKind=null; }
     }
   }
   if(cur) blocks.push(cur);
   state.diffBlocks = blocks;
+}
+
+/* After buildDiffBlocks has grouped a 'mod' row together with a directly
+   bordering 'add'/'del' row into a single diffBlock, make the rest of the
+   UI agree that it's one combined "modify" diff rather than two different-
+   colored ones sitting side by side: for each column, if any row within a
+   diffBlock has that column's status as 'mod', every 'add'/'del' status
+   in that same column within the block becomes 'mod' too. This is what
+   renderColumn's per-column boundary/segment logic, findSegmentForRow
+   (merge/delete button ranges), and the gap-marker coloring all key off
+   of, so a single merge/delete button set and a single mod-colored region
+   naturally result -- a column with no 'mod' anywhere in the block (e.g.
+   a genuinely unrelated add/del on a column that never actually changed
+   here) is left exactly as it was. */
+function unifyModAdjacentDiffs(){
+  const cols = state.mode==='3way' ? ['left','mid','right'] : ['left','right'];
+  state.diffBlocks.forEach(block=>{
+    cols.forEach(col=>{
+      let hasMod = false;
+      for(let i=block.start;i<=block.end;i++){
+        const r = state.rows[i];
+        if(r && r._cls && r._cls[col]==='mod'){ hasMod = true; break; }
+      }
+      if(!hasMod) return;
+      for(let i=block.start;i<=block.end;i++){
+        const r = state.rows[i];
+        if(r && r._cls && (r._cls[col]==='add' || r._cls[col]==='del')){
+          r._cls[col] = 'mod';
+        }
+      }
+    });
+  });
 }
 
 /* Determine the diff relationship between two specific columns for one row,
@@ -749,25 +810,38 @@ function pairDiffType(row, colA, colB){
   return 'equal';
 }
 
-/* Group consecutive rows where colA/colB actually differ into blocks,
-   so gutter markers only appear where that specific pair has a real diff. */
+/* Group consecutive rows where colA/colB actually differ into blocks, so
+   gutter markers only appear where that specific pair has a real diff. A
+   'mod' segment directly bordering an 'add'/'del' segment (no equal row
+   between them) is merged into the same block instead of starting a new
+   one -- same rule as buildDiffBlocks -- and the whole merged block is
+   colored/typed as 'mod' throughout, since it's now one combined "modify"
+   diff rather than two visually distinct ones sitting side by side. A
+   block that never actually touches a 'mod' row (e.g. a plain add-only or
+   del-only run) keeps its original type. */
 function buildPairBlocks(colA, colB){
   const blocks = [];
   let cur = null;
   for(let i=0;i<state.rows.length;i++){
     const t = pairDiffType(state.rows[i], colA, colB);
     if(t !== 'equal'){
-      if(cur && cur.type===t){
+      const modBordersAddDel = cur &&
+        ((cur.type==='mod' && (t==='add'||t==='del')) ||
+         (t==='mod' && (cur.type==='add'||cur.type==='del')));
+      if(cur && (cur.type===t || modBordersAddDel)){
         cur.end = i;
+        cur.type = t; // track the most recent kind, same as buildDiffBlocks' curKind
+        if(t==='mod') cur.hasMod = true;
       } else {
         if(cur) blocks.push(cur);
-        cur = {start:i, end:i, type:t};
+        cur = {start:i, end:i, type:t, hasMod: t==='mod'};
       }
     } else if(cur){
       blocks.push(cur); cur=null;
     }
   }
   if(cur) blocks.push(cur);
+  blocks.forEach(b=>{ if(b.hasMod) b.type = 'mod'; });
   return blocks;
 }
 
@@ -804,6 +878,7 @@ function recompute(opts){
     state.rows = buildRows2(state.cols.left.lines, state.cols.right.lines);
   }
   buildDiffBlocks();
+  unifyModAdjacentDiffs();
   state.currentDiffIndex = state.diffBlocks.length ? 0 : -1;
   render();
   updateDiffCounter();
@@ -1090,10 +1165,11 @@ function renderColumn(col){
     }
   }
 
-  // Consecutive gap rows (add/del) for this column collapse into a single
-  // thin marker line rendered between the two real lines that surround them,
-  // instead of one blank numbered row per gap.
-  let pendingGap = null; // {type:'add'|'del', current:boolean, rowIdx:number, leftHasContent:boolean, rightHasContent:boolean, showButton:boolean, blockStart:boolean, blockEnd:boolean}
+  // Consecutive gap rows (add/del, or mod when merged with a bordering
+  // add/del by unifyModAdjacentDiffs) for this column collapse into a
+  // single thin marker line rendered between the two real lines that
+  // surround them, instead of one blank numbered row per gap.
+  let pendingGap = null; // {type:'add'|'del'|'mod', current:boolean, rowIdx:number, leftHasContent:boolean, rightHasContent:boolean, showButton:boolean, blockStart:boolean, blockEnd:boolean}
   // Only show one merge/delete button set per contiguous same-type diff
   // segment. A single overall diffBlock can still contain more than one of
   // these segments back-to-back (e.g. a "modified" line immediately
@@ -1105,10 +1181,10 @@ function renderColumn(col){
   let lastRunStatus = null;
   const flushGap = () => {
     if(!pendingGap) return;
-    const typeCls = pendingGap.type==='add' ? 'diff-add' : 'diff-del';
+    const typeCls = pendingGap.type==='add' ? 'diff-add' : pendingGap.type==='del' ? 'diff-del' : 'diff-mod';
     const curCls = pendingGap.current ? ' gap-current' : '';
     const edgeCls = (pendingGap.blockStart ? ' diff-block-start' : '') + (pendingGap.blockEnd ? ' diff-block-end' : '');
-    const label = pendingGap.type==='add' ? 'Content added here' : 'Content deleted here';
+    const label = pendingGap.type==='add' ? 'Content added here' : pendingGap.type==='del' ? 'Content deleted here' : 'Content changed here';
     let actionsHtml = '';
     if(pendingGap.showButton){
       let effHasLeftPane = hasLeftPane;
@@ -1146,7 +1222,7 @@ function renderColumn(col){
 
     if(!cell){
       // Gap row: accumulate into the pending marker instead of rendering a blank line
-      if(status==='add' || status==='del'){
+      if(status==='add' || status==='del' || status==='mod'){
         if(!pendingGap){
           if(status !== lastRunStatus){
             // Type changed since the last segment (e.g. right after a
