@@ -182,7 +182,7 @@
      continuous line. Still kept below the sticky action buttons
      (z-index:6) so it never covers them. */
   .gap-line::after{
-    content:'';position:absolute;left:0;right:0;top:-1px;height:2px;
+    content:'';position:absolute;left:0;right:0;top:-0.5px;height:1px;
     z-index:5;pointer-events:none;
   }
   .gap-line.diff-add::after{background:var(--diff-add-border);}
@@ -212,24 +212,28 @@
 
   /* Diff block boundary lines: drawn only on the first/last row of each
      contiguous diff block (not on every row), in the color matching that
-     row's own diff type. Uses absolutely-positioned pseudo-elements (not
-     a border) so the row's actual height/layout math is unaffected, and
-     a low z-index keeps them beneath the sticky .actions button layer
-     (z-index:5) so they never cover the merge/delete buttons. */
+     row's own diff type. Uses a border on an absolutely-positioned
+     pseudo-element (not a background+height box) so the row's actual
+     layout math is unaffected and the browser renders a crisp single
+     device pixel the same way on both edges; a low z-index keeps them
+     beneath the sticky .actions button layer (z-index:5) so they never
+     cover the merge/delete buttons. */
   .line.diff-block-start::before{
-    content:'';position:absolute;left:0;right:0;top:0;height:2px;
+    content:'';position:absolute;left:0;right:0;top:0;height:0;
+    border-top:1px solid transparent;
     z-index:1;pointer-events:none;
   }
   .line.diff-block-end::after{
-    content:'';position:absolute;left:0;right:0;bottom:0;height:2px;
+    content:'';position:absolute;left:0;right:0;bottom:0;height:0;
+    border-bottom:1px solid transparent;
     z-index:1;pointer-events:none;
   }
-  .line.diff-mod.diff-block-start::before{background:var(--diff-mod-border);}
-  .line.diff-add.diff-block-start::before{background:var(--diff-add-border);}
-  .line.diff-del.diff-block-start::before{background:var(--diff-del-border);}
-  .line.diff-mod.diff-block-end::after{background:var(--diff-mod-border);}
-  .line.diff-add.diff-block-end::after{background:var(--diff-add-border);}
-  .line.diff-del.diff-block-end::after{background:var(--diff-del-border);}
+  .line.diff-mod.diff-block-start::before{border-top-color:var(--diff-mod-border);}
+  .line.diff-add.diff-block-start::before{border-top-color:var(--diff-add-border);}
+  .line.diff-del.diff-block-start::before{border-top-color:var(--diff-del-border);}
+  .line.diff-mod.diff-block-end::after{border-bottom-color:var(--diff-mod-border);}
+  .line.diff-add.diff-block-end::after{border-bottom-color:var(--diff-add-border);}
+  .line.diff-del.diff-block-end::after{border-bottom-color:var(--diff-del-border);}
 
 
   /* Action icons for each diff block, always visible (right edge of content) */
@@ -272,7 +276,7 @@
   .connector-fill.add{fill:var(--diff-add-line);}
   .connector-fill.del{fill:var(--diff-del-line);}
   .connector-fill.mod{fill:var(--diff-mod-line);}
-  .connector-line{fill:none;stroke-width:1.5;opacity:.9;}
+  .connector-line{fill:none;stroke-width:1;opacity:1;}
   .connector-line.add{stroke:var(--diff-add-border);}
   .connector-line.del{stroke:var(--diff-del-border);}
   .connector-line.mod{stroke:var(--diff-mod-border);}
