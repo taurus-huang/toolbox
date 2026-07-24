@@ -2276,35 +2276,79 @@ document.getElementById('editor-wrap').addEventListener('keydown', (e)=>{
    neighboring one in the same column, dropping the newline between them.
    ====================================================================== */
 
-/* Merge the line at index firstIdx with the line right after it
-   (firstIdx+1) in the given column, placing the caret at the join point.
-   Used for both Delete (firstIdx = current line) and Backspace
-   (firstIdx = previous line) since both collapse the same pair of lines. */
-function mergeLinesInColumn(col, firstIdx){
+/* Character offset of a given Range boundary (node, offset), counted
+   within el's own text content. Same walk as getCaretCharOffset but for
+   an arbitrary boundary rather than always the live selection's start,
+   so it can be reused for both ends of a cross-line selection. */
+function charOffsetInEl(el, node, offset){
+  const pre = document.createRange();
+  pre.selectNodeContents(el);
+  try{ pre.setEnd(node, offset); }
+  catch(err){ return el.textContent.length; }
+  return pre.toString().length;
+}
+
+/* Replace the current selection with insertText, exactly like a normal
+   text editor does when you type/paste/press Enter/Backspace over a
+   selection -- even though here the selection may span several lines
+   that are each their own separate contenteditable div (see
+   renderColumn), so the browser has no native way to do this itself.
+   insertText may itself contain '\n' (e.g. a multi-line paste), which
+   splits into that many resulting lines. Passing '' just deletes the
+   selection (used for Backspace/Delete/Cut). Returns true if a
+   cross-line selection was found and handled, false otherwise (e.g. the
+   selection was collapsed or confined to a single line, in which case
+   the browser's own native editing already does the right thing and
+   should be left alone). */
+function replaceCrossLineSelection(insertText){
+  const sel = window.getSelection();
+  if(!sel || sel.rangeCount===0 || sel.isCollapsed) return false;
+  const range = sel.getRangeAt(0);
+  const startEl = closestContentEl(range.startContainer);
+  const endEl = closestContentEl(range.endContainer);
+  if(!startEl || !endEl || startEl.dataset.col !== endEl.dataset.col) return false;
+  if(startEl === endEl) return false; // single line: native editing already handles this
+
+  const col = startEl.dataset.col;
   const container = document.getElementById('lines-' + col);
-  if(!container) return;
+  if(!container) return false;
+
   // Pull every line's LIVE (possibly not-yet-committed) text straight from
-  // the DOM -- same approach as commitColumnEdits -- so this still works
-  // correctly if the user is mid-edit and the background commit debounce
-  // for this column hasn't fired yet.
+  // the DOM, same approach as mergeLinesInColumn/commitColumnEdits.
   const lineEls = container.querySelectorAll('.line:not(.empty) .content[contenteditable="true"]');
   const liveLines = [];
-  lineEls.forEach(el=>{ liveLines[+el.dataset.lineIdx] = el.textContent.replace(/\r/g, ''); });
+  lineEls.forEach(elx=>{ liveLines[+elx.dataset.lineIdx] = elx.textContent.replace(/\r/g, ''); });
 
-  if(firstIdx < 0 || firstIdx+1 >= liveLines.length) return; // nothing on the other side to merge with
+  const startLineIdx = parseInt(startEl.dataset.lineIdx, 10);
+  const endLineIdx = parseInt(endEl.dataset.lineIdx, 10);
+  if(Number.isNaN(startLineIdx) || Number.isNaN(endLineIdx)) return false;
+  // range.startContainer/endContainer are always in document order (earlier
+  // point first) regardless of which direction the user dragged (see the
+  // copy handler below), so startLineIdx is always <= endLineIdx here.
+  const startCharOffset = charOffsetInEl(startEl, range.startContainer, range.startOffset);
+  const endCharOffset = charOffsetInEl(endEl, range.endContainer, range.endOffset);
+
+  const prefix = (liveLines[startLineIdx] || '').slice(0, startCharOffset);
+  const suffix = (liveLines[endLineIdx] || '').slice(endCharOffset);
+
+  const pieces = (insertText || '').split('\n');
+  pieces[0] = prefix + pieces[0];
+  pieces[pieces.length-1] = pieces[pieces.length-1] + suffix;
+  liveLines.splice(startLineIdx, endLineIdx-startLineIdx+1, ...pieces);
 
   // A pending debounced commit from ordinary typing is now superseded by
-  // this merge (which already reads the live, up-to-the-moment text) --
-  // cancel it so it doesn't redundantly re-fire and re-render afterward.
+  // this (which already reads the live, up-to-the-moment text) -- cancel
+  // it so it doesn't redundantly re-fire and re-render afterward.
   if(editDebounce){ clearTimeout(editDebounce); editDebounce = null; }
-
-  const firstLen = liveLines[firstIdx].length;
-  const merged = liveLines[firstIdx] + liveLines[firstIdx+1];
-  liveLines.splice(firstIdx, 2, merged);
 
   pushHistory(col);
   state.cols[col].text = liveLines.join('\n');
-  recompute({keepView:true, restoreCaret:{col, lineIdx:firstIdx, offset:firstLen}});
+
+  const lastIdx = pieces.length-1;
+  const targetLineIdx = startLineIdx + lastIdx;
+  const targetOffset = pieces[lastIdx].length - suffix.length;
+  recompute({keepView:true, restoreCaret:{col, lineIdx:targetLineIdx, offset:targetOffset}});
+  return true;
 }
 
 document.getElementById('editor-wrap').addEventListener('keydown', (e)=>{
@@ -2314,7 +2358,16 @@ document.getElementById('editor-wrap').addEventListener('keydown', (e)=>{
   if(!el) return;
 
   const sel = window.getSelection();
-  if(!sel || sel.rangeCount===0 || !sel.isCollapsed) return; // an actual selection: let the browser's normal delete-selection behavior run
+  if(!sel || sel.rangeCount===0) return;
+
+  if(!sel.isCollapsed){
+    // A real selection exists. If it's confined to this one line's own
+    // contenteditable div, the browser's native delete-selection handling
+    // already works correctly -- leave it alone. If it spans multiple
+    // lines, replaceCrossLineSelection does the equivalent by hand.
+    if(replaceCrossLineSelection('')) e.preventDefault();
+    return;
+  }
 
   const col = el.dataset.col;
   const lineIdx = parseInt(el.dataset.lineIdx, 10);
@@ -2330,6 +2383,49 @@ document.getElementById('editor-wrap').addEventListener('keydown', (e)=>{
     e.preventDefault();
     mergeLinesInColumn(col, lineIdx-1);
   }
+});
+
+/* Enter over a cross-line selection: split the selection's remainder onto
+   a new line, same as a normal editor. (Enter with no selection, or a
+   selection confined to a single line, is left to the browser's own
+   default contenteditable behavior, unchanged from before.) */
+document.getElementById('editor-wrap').addEventListener('keydown', (e)=>{
+  if(e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+  const el = e.target.closest && e.target.closest('.content[contenteditable="true"]');
+  if(!el) return;
+  if(replaceCrossLineSelection('\n')) e.preventDefault();
+});
+
+/* Typing a character, IME composition, or a paste/drag-drop while a
+   cross-line selection is active: beforeinput is the only reliable place
+   to catch the actual text being inserted (arbitrary characters, IME
+   results, or clipboard/drag contents), which keydown alone can't give
+   us. deleteContentBackward/Forward are also handled here as a fallback
+   for input methods (e.g. some virtual keyboards) that go straight to
+   beforeinput without a matching keydown Backspace/Delete. */
+document.getElementById('editor-wrap').addEventListener('beforeinput', (e)=>{
+  const sel = window.getSelection();
+  if(!sel || sel.rangeCount===0 || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  const startEl = closestContentEl(range.startContainer);
+  const endEl = closestContentEl(range.endContainer);
+  if(!startEl || !endEl || startEl.dataset.col !== endEl.dataset.col || startEl===endEl) return;
+
+  let insertText = null;
+  if(e.inputType==='insertText' || e.inputType==='insertReplacementText'){
+    insertText = e.data || '';
+  } else if(e.inputType==='insertFromPaste' || e.inputType==='insertFromDrop'){
+    insertText = (e.dataTransfer && e.dataTransfer.getData('text/plain')) || '';
+  } else if(e.inputType==='insertParagraph' || e.inputType==='insertLineBreak'){
+    insertText = '\n';
+  } else if(e.inputType==='deleteContentBackward' || e.inputType==='deleteContentForward'){
+    insertText = '';
+  } else {
+    return; // some other input type over a cross-line selection -- leave untouched
+  }
+
+  e.preventDefault();
+  replaceCrossLineSelection(insertText);
 });
 
 /* Multi-line text selection: each line is rendered as its own separate
@@ -2442,25 +2538,19 @@ function closestContentEl(node){
   return el ? el.closest('.content[contenteditable="true"]') : null;
 }
 
-document.getElementById('editor-wrap').addEventListener('copy', (e)=>{
-  const sel = window.getSelection();
-  if(!sel || sel.rangeCount === 0 || sel.isCollapsed) return; // nothing selected; let default copy happen
-  const range = sel.getRangeAt(0);
-
-  const startEl = closestContentEl(range.startContainer);
-  const endEl = closestContentEl(range.endContainer);
-  // Only take over for selections that live inside our editable lines and
-  // stay within a single column; anything else falls back to the browser's
-  // normal copy behavior untouched.
-  if(!startEl || !endEl || startEl.dataset.col !== endEl.dataset.col) return;
-
+/* Build the plain-text clipboard contents for a selection that starts in
+   startEl and ends in endEl (both within the same column's line list),
+   respecting the exact partial-line boundaries of range. Shared by the
+   copy and cut handlers below. Returns null if startEl/endEl can't be
+   located in that column's line list. */
+function buildMultiLineClipboardText(range, startEl, endEl){
   const col = startEl.dataset.col;
   const container = document.getElementById('lines-' + col);
-  if(!container) return;
+  if(!container) return null;
   const allContents = Array.from(container.querySelectorAll('.content[contenteditable="true"]'));
   const startIdx = allContents.indexOf(startEl);
   const endIdx = allContents.indexOf(endEl);
-  if(startIdx === -1 || endIdx === -1) return;
+  if(startIdx === -1 || endIdx === -1) return null;
   const lo = Math.min(startIdx, endIdx), hi = Math.max(startIdx, endIdx);
 
   const lines = [];
@@ -2476,9 +2566,47 @@ document.getElementById('editor-wrap').addEventListener('copy', (e)=>{
     else lineRange.setEnd(el, el.childNodes.length);
     lines.push(lineRange.toString());
   }
+  return lines.join('\n');
+}
 
-  e.clipboardData.setData('text/plain', lines.join('\n'));
+document.getElementById('editor-wrap').addEventListener('copy', (e)=>{
+  const sel = window.getSelection();
+  if(!sel || sel.rangeCount === 0 || sel.isCollapsed) return; // nothing selected; let default copy happen
+  const range = sel.getRangeAt(0);
+
+  const startEl = closestContentEl(range.startContainer);
+  const endEl = closestContentEl(range.endContainer);
+  // Only take over for selections that live inside our editable lines and
+  // stay within a single column; anything else falls back to the browser's
+  // normal copy behavior untouched.
+  if(!startEl || !endEl || startEl.dataset.col !== endEl.dataset.col) return;
+
+  const text = buildMultiLineClipboardText(range, startEl, endEl);
+  if(text === null) return;
+  e.clipboardData.setData('text/plain', text);
   e.preventDefault();
+});
+
+/* Cut (Ctrl+X) over a selection spanning multiple lines: same reasoning
+   as copy above for what goes on the clipboard, then remove the selected
+   text via replaceCrossLineSelection since the browser can't natively
+   delete across separate per-line contenteditable divs (see the keydown/
+   beforeinput handlers above). A selection confined to a single line is
+   left to the browser's own native cut, which already works fine. */
+document.getElementById('editor-wrap').addEventListener('cut', (e)=>{
+  const sel = window.getSelection();
+  if(!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+
+  const startEl = closestContentEl(range.startContainer);
+  const endEl = closestContentEl(range.endContainer);
+  if(!startEl || !endEl || startEl.dataset.col !== endEl.dataset.col || startEl === endEl) return;
+
+  const text = buildMultiLineClipboardText(range, startEl, endEl);
+  if(text === null) return;
+  e.clipboardData.setData('text/plain', text);
+  e.preventDefault();
+  replaceCrossLineSelection('');
 });
 
 /* Click on gutter -> jump to proportional file position
