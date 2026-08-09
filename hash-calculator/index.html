@@ -240,7 +240,8 @@
     line-height:1.5;
     transition:color .2s;
   }
-  .hash-value.pending{color:var(--text-faint);}
+  .hash-value.pending{color:var(--text-faint);animation:pulse 1.1s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{opacity:.55;}50%{opacity:1;}}
   .hash-row.matched .hash-value{color:var(--accent);}
   .hash-row.matched{background:rgba(94,234,212,0.05);}
 
@@ -408,6 +409,59 @@
 
   let currentResults = {};
   let busy = false;
+  let activeWorkers = {};   // algoKey -> Worker
+  let runToken = 0;         // increments per file, guards against stale worker messages
+  let workerBlobUrl = null;
+
+  // Each algorithm gets its own dedicated Web Worker so all hashes are
+  // computed on separate threads, in parallel. Whichever finishes first
+  // is shown first — a quick visual read on relative algorithm speed.
+  function getWorkerBlobUrl(){
+    if(workerBlobUrl) return workerBlobUrl;
+    const workerSrc = `
+      importScripts('https://cdn.jsdelivr.net/npm/hash-wasm@4');
+      const createFns = {
+        xxh3:   () => hashwasm.createXXHash3(0, 0),
+        blake3: () => hashwasm.createBLAKE3(256),
+        md5:    () => hashwasm.createMD5(),
+        sha1:   () => hashwasm.createSHA1(),
+        sha256: () => hashwasm.createSHA256(),
+        sha384: () => hashwasm.createSHA384(),
+        sha512: () => hashwasm.createSHA512(),
+      };
+      self.onmessage = async (e) => {
+        const { algoKey, file } = e.data;
+        const t0 = performance.now();
+        try{
+          const hasher = await createFns[algoKey]();
+          hasher.init();
+          const size = file.size;
+          const chunkSize = 16 * 1024 * 1024; // 16MB
+          let offset = 0;
+          while(offset < size){
+            const slice = file.slice(offset, Math.min(offset + chunkSize, size));
+            const buf = new Uint8Array(await slice.arrayBuffer());
+            hasher.update(buf);
+            offset += chunkSize;
+            const pct = Math.min(100, Math.round((offset / size) * 100));
+            self.postMessage({ type: 'progress', algoKey, pct });
+          }
+          const hash = hasher.digest('hex').toUpperCase();
+          self.postMessage({ type: 'done', algoKey, hash, elapsed: performance.now() - t0 });
+        }catch(err){
+          self.postMessage({ type: 'error', algoKey, message: (err && err.message) ? err.message : String(err) });
+        }
+      };
+    `;
+    const blob = new Blob([workerSrc], { type: 'application/javascript' });
+    workerBlobUrl = URL.createObjectURL(blob);
+    return workerBlobUrl;
+  }
+
+  function stopActiveWorkers(){
+    Object.values(activeWorkers).forEach(w => w.terminate());
+    activeWorkers = {};
+  }
 
   function fmtBytes(n){
     if(n===0) return '0 B';
@@ -457,6 +511,8 @@
   }
 
   function reset(){
+    runToken++;
+    stopActiveWorkers();
     fileInput.value = '';
     fileMeta.classList.remove('show');
     progressWrap.classList.remove('show');
@@ -472,6 +528,8 @@
   // Clear button: only empties the filename and the hash value fields.
   // Everything else (progress bar, verify box, dropzone messages) is left as-is.
   function clearHashContent(){
+    runToken++;
+    stopActiveWorkers();
     fileInput.value = '';
     fName.textContent = '—';
     fSub.textContent = '—';
@@ -479,12 +537,15 @@
     buildRows('—');
   }
 
-  async function handleFile(file){
+  function handleFile(file){
     if(!file || busy) return;
-    if(typeof hashwasm === 'undefined'){
-      alert('Could not load the hashing library (hash-wasm) from the CDN. Please check your internet connection and reload the page.');
+    if(typeof Worker === 'undefined'){
+      alert('Your browser does not support Web Workers, which this page needs to hash files in parallel.');
       return;
     }
+
+    const myToken = ++runToken;
+    stopActiveWorkers();
 
     fName.textContent = file.name || '(unnamed file)';
     fSub.textContent = `${fmtBytes(file.size)} · ${file.type || 'unknown type'}`;
@@ -495,70 +556,86 @@
     verifyBox.classList.remove('show');
     progressWrap.classList.add('show');
     progressFill.style.width = '0%';
-    progressPct.textContent = '0%';
-    progressLabel.textContent = 'Hashing…';
+    progressPct.textContent = `0/${ALGOS.length}`;
+    progressLabel.textContent = 'Hashing… (each algorithm runs on its own thread)';
     setBusyUI(true, true);
 
+    currentResults = {};
+    let doneCount = 0;
+    let hadError = false;
+
+    let blobUrl;
     try{
-      const hashers = {
-        xxh3:   await hashwasm.createXXHash3(0, 0),
-        blake3: await hashwasm.createBLAKE3(256),
-        md5:    await hashwasm.createMD5(),
-        sha1:   await hashwasm.createSHA1(),
-        sha256: await hashwasm.createSHA256(),
-        sha384: await hashwasm.createSHA384(),
-        sha512: await hashwasm.createSHA512(),
-      };
-      Object.values(hashers).forEach(h => h.init());
-
-      const size = file.size;
-      const chunkSize = 16 * 1024 * 1024; // 16MB
-      let offset = 0;
-
-      if(size === 0){
-        // empty file: nothing to feed, digest immediately
-      }
-
-      while(offset < size){
-        const slice = file.slice(offset, Math.min(offset + chunkSize, size));
-        const buf = new Uint8Array(await slice.arrayBuffer());
-        for(const key in hashers){
-          hashers[key].update(buf);
-        }
-        offset += chunkSize;
-        const pct = Math.min(100, Math.round((offset/size)*100));
-        progressFill.style.width = pct + '%';
-        progressPct.textContent = pct + '%';
-        // yield so the UI can repaint on large files
-        await new Promise(r => setTimeout(r, 0));
-      }
-
-      progressFill.style.width = '100%';
-      progressPct.textContent = '100%';
-      progressLabel.textContent = 'Done';
-
-      currentResults = {};
-      for(const key in hashers){
-        currentResults[key] = hashers[key].digest('hex').toUpperCase();
-      }
-
-      ALGOS.forEach(a=>{
-        const el = document.getElementById('val-'+a.key);
-        el.textContent = currentResults[a.key];
-        el.classList.remove('pending');
-        const btn = document.querySelector(`.copy-icon-btn[data-key="${a.key}"]`);
-        btn.disabled = false;
-      });
-
-      verifyBox.classList.add('show');
-      setTimeout(()=>progressWrap.classList.remove('show'), 600);
+      blobUrl = getWorkerBlobUrl();
     }catch(err){
-      progressLabel.textContent = 'Error';
-      console.error(err);
-      alert('Something went wrong while hashing this file: ' + (err && err.message ? err.message : err));
-    }finally{
+      alert('Could not set up the hashing workers: ' + (err && err.message ? err.message : err));
       setBusyUI(false, true);
+      return;
     }
+
+    ALGOS.forEach(a=>{
+      const worker = new Worker(blobUrl);
+      activeWorkers[a.key] = worker;
+
+      worker.onmessage = (e)=>{
+        if(myToken !== runToken) return; // stale run (file cleared/replaced) — ignore
+        const msg = e.data;
+        if(msg.algoKey !== a.key) return;
+
+        if(msg.type === 'progress'){
+          const el = document.getElementById('val-'+a.key);
+          if(el && el.classList.contains('pending')){
+            el.textContent = `computing… ${msg.pct}%`;
+          }
+        } else if(msg.type === 'done'){
+          currentResults[a.key] = msg.hash;
+          const el = document.getElementById('val-'+a.key);
+          el.textContent = msg.hash;
+          el.classList.remove('pending');
+          const btn = document.querySelector(`.copy-icon-btn[data-key="${a.key}"]`);
+          if(btn) btn.disabled = false;
+          worker.terminate();
+          delete activeWorkers[a.key];
+
+          doneCount++;
+          progressFill.style.width = Math.round((doneCount/ALGOS.length)*100) + '%';
+          progressPct.textContent = `${doneCount}/${ALGOS.length}`;
+
+          if(doneCount === ALGOS.length){
+            progressLabel.textContent = 'Done';
+            verifyBox.classList.add('show');
+            setBusyUI(false, true);
+            setTimeout(()=>{ if(myToken === runToken) progressWrap.classList.remove('show'); }, 600);
+          }
+        } else if(msg.type === 'error'){
+          hadError = true;
+          const el = document.getElementById('val-'+a.key);
+          if(el){ el.textContent = 'Error'; el.classList.remove('pending'); }
+          console.error(`${a.name} worker error:`, msg.message);
+          worker.terminate();
+          delete activeWorkers[a.key];
+
+          doneCount++;
+          progressPct.textContent = `${doneCount}/${ALGOS.length}`;
+          if(doneCount === ALGOS.length){
+            progressLabel.textContent = hadError ? 'Finished with errors' : 'Done';
+            verifyBox.classList.add('show');
+            setBusyUI(false, true);
+          }
+        }
+      };
+
+      worker.onerror = (err)=>{
+        if(myToken !== runToken) return;
+        console.error(`${a.name} worker crashed:`, err.message);
+        const el = document.getElementById('val-'+a.key);
+        if(el){ el.textContent = 'Error'; el.classList.remove('pending'); }
+        worker.terminate();
+        delete activeWorkers[a.key];
+      };
+
+      worker.postMessage({ algoKey: a.key, file });
+    });
   }
 
   // ---- drop zone interactions ----
