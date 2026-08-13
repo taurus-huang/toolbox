@@ -1673,7 +1673,7 @@ function bindProps(o) {
   const st = document.getElementById("prop-shapeType"); if (st) st.addEventListener("change", () => { o.type = st.value; pushHistory(); render(); buildProps(); });
   ["lineStyle","startCap","endCap"].forEach((k) => { const el = document.getElementById("prop-"+k); if (el) el.addEventListener("change", () => applyProp(o, k, el.value)); });
   const tx = document.getElementById("prop-text"); if (tx) tx.addEventListener("input", () => { o.text = tx.value; autoSizeText(o); render(); buildObjectList(); });
-  const filled = document.getElementById("prop-filled"); if (filled) filled.addEventListener("change", () => { o.filled = filled.checked; pushHistory(); render(); buildProps(); });
+  const filled = document.getElementById("prop-filled"); if (filled) filled.addEventListener("change", () => { o.filled = filled.checked; if (o.filled) o.fill = o.stroke; pushHistory(); render(); buildProps(); });
   const bg = document.getElementById("prop-bg"); if (bg) bg.addEventListener("change", () => { o.bg = bg.checked; pushHistory(); render(); buildProps(); });
 
   propsContent.querySelectorAll("[data-act]").forEach((btn) => btn.addEventListener("click", () => layerAction(o, btn.dataset.act)));
