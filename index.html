@@ -163,9 +163,21 @@
         .tool-desc-list li {
             margin-bottom: 0.25rem;
         }
-        
+
         .tool-desc-list li:last-child {
             margin-bottom: 0;
+        }
+
+        /* Simple placeholder state while a card's metadata is still loading */
+        .tool-card.is-loading .tool-name {
+            color: var(--text-secondary);
+        }
+
+        .tool-card.is-error .tool-name::after {
+            content: " (讀取失敗)";
+            font-size: 0.75rem;
+            font-weight: 400;
+            color: #c0392b;
         }
     </style>
 </head>
@@ -184,109 +196,119 @@
 
     <script>
         // ===================================================
-        // Structured Sub-tool Configuration Array
-        // Add new tools here; the interface updates automatically.
+        // Sub-tool directory list.
+        // Add a new tool by adding its folder name here — nothing else.
+        // Name / version / description are auto-parsed from each
+        // sub-tool's own index.html <head> <meta> tags.
         // ===================================================
-        const toolsData = [
-            {
-                dir: "stopwatch",
-                name: "Stopwatch",
-                version: "v1.0.0", // Leaving it empty hides the version tag entirely
-                desc: [
-                    "Supports milliseconds accuracy.",
-					"Display visual stopwatch down to milliseconds.",
-                ]
-            },
-            {
-                dir: "image-annotator",
-                name: "Image Annotator",
-                version: "v0.9.0", // Leaving it empty hides the version tag entirely
-                desc: [
-                    "Supports drag-and-drop image uploading.",
-					"Mirror, flip, and rotate images.",
-                    "Draw shapes, lines and arrows onto images.",
-                    "Append text, numbered marker and highlighter.",
-                    "Export to PNG format."
-                ]
-            },
-            {
-                dir: "diff-tool",
-                name: "Diff Tool",
-                version: "", // Leaving it empty hides the version tag entirely
-                desc: [
-                    "Supports drag-and-drop file uploading.",
-					"Supports 2-way / 3-way text comparison.",
-                    "Identifies discrepancies at block and inline levels.",
-					"Provides intuitive action buttons allowing merge discrepancies.",
-                ]
-            },
-            {
-                dir: "hash-calculator",
-                name: "Hash Calculator",
-                version: "", // Leaving it empty hides the version tag entirely
-                desc: [
-                    "Entirely local processing, no data uploaded.",
-					"High-Performance WASM Engine.",
-                    "Support XXH3, BLAKE3, SHA-256, SHA-384, SHA-512, MD5, SHA-1",
-					"Chunked Large File Handling",
-                ]
-            },
+        const toolDirs = [
+            "diff-tool",
+            "hash-calculator",
+            "image-annotator",
+            "stopwatch",
         ];
 
-        // ===================================================
-        // Dynamic Card Rendering & Statistics Logic
-        // ===================================================
-        function renderTools() {
-            const grid = document.getElementById('toolsGrid');
-            const counter = document.getElementById('toolCounter');
-            
-            // Clear the grid container before render
-            grid.innerHTML = ''; 
-            
-            // Update the total tool count badge dynamically
-            counter.textContent = `${toolsData.length} ${toolsData.length === 1 ? 'Tool' : 'Tools'}`;
+        // Meta tag convention expected inside each sub-tool's <head>:
+        //   <meta name="tool-name" content="Stopwatch">
+        //   <meta name="tool-version" content="v1.0.0">   (optional — omit to hide the badge)
+        //   <meta name="tool-desc" content="First bullet point.">
+        //   <meta name="tool-desc" content="Second bullet point.">
+        //   ... (repeat tool-desc as many times as needed)
 
-            // Build and append card elements from configuration array
-            toolsData.forEach(tool => {
-                const toolUrl = `./${tool.dir}/index.html`;
+        // Parse a sub-tool's fetched HTML text into { name, version, desc[] }
+        function parseToolMeta(htmlText, fallbackDir) {
+            const doc = new DOMParser().parseFromString(htmlText, 'text/html');
 
-                // Create the card anchor tag
-                const card = document.createElement('a');
-                card.className = 'tool-card';
-                card.href = toolUrl;
-                card.target = '_blank'; // Launches the tool target within a separate browser tab
+            const getMeta = (name) => doc.querySelector(`meta[name="${name}"]`);
+            const getAllMeta = (name) => Array.from(doc.querySelectorAll(`meta[name="${name}"]`));
 
-                // Conditionally render the version tag markup only if the field is not empty
-                const versionMarkup = (tool.version && tool.version.trim() !== "") 
-                    ? `<span class="tool-version">${tool.version}</span>` 
-                    : "";
+            const nameMeta = getMeta('tool-name');
+            const versionMeta = getMeta('tool-version');
+            const descMetas = getAllMeta('tool-desc');
 
-                // Map the description array elements into <li> string elements
-                const descItemsMarkup = Array.isArray(tool.desc) 
-                    ? tool.desc.map(item => `<li>${item}</li>`).join('')
-                    : `<li>${tool.desc}</li>`;
-
-                // Set up inner structural layout including preview iframe and ul list
-                card.innerHTML = `
-                    <div class="preview-container">
-                        <iframe src="${toolUrl}" loading="lazy" tabindex="-1"></iframe>
-                    </div>
-                    <div class="tool-info">
-                        <div class="tool-header">
-                            <span class="tool-name">${tool.name}</span>
-                            ${versionMarkup}
-                        </div>
-                        <ul class="tool-desc-list">
-                            ${descItemsMarkup}
-                        </ul>
-                    </div>
-                `;
-
-                grid.appendChild(card);
-            });
+            return {
+                name: nameMeta ? nameMeta.getAttribute('content') : fallbackDir,
+                version: versionMeta ? versionMeta.getAttribute('content') : '',
+                desc: descMetas.length
+                    ? descMetas.map(m => m.getAttribute('content'))
+                    : ['(此工具尚未提供說明 meta 標籤)']
+            };
         }
 
-        // Initialize execution upon document loading completion
+        // Build the initial card shell immediately (so the grid + preview
+        // iframe render right away), then fill in text once metadata resolves.
+        function createCardShell(dir, toolUrl) {
+            const card = document.createElement('a');
+            card.className = 'tool-card is-loading';
+            card.href = toolUrl;
+            card.target = '_blank';
+            card.dataset.dir = dir;
+
+            card.innerHTML = `
+                <div class="preview-container">
+                    <iframe src="${toolUrl}" loading="lazy" tabindex="-1"></iframe>
+                </div>
+                <div class="tool-info">
+                    <div class="tool-header">
+                        <span class="tool-name">${dir}</span>
+                        <span class="tool-version-slot"></span>
+                    </div>
+                    <ul class="tool-desc-list">
+                        <li>載入中...</li>
+                    </ul>
+                </div>
+            `;
+            return card;
+        }
+
+        function fillCard(card, meta) {
+            card.classList.remove('is-loading');
+
+            const versionMarkup = (meta.version && meta.version.trim() !== '')
+                ? `<span class="tool-version">${meta.version}</span>`
+                : '';
+
+            const descItemsMarkup = meta.desc.map(item => `<li>${item}</li>`).join('');
+
+            card.querySelector('.tool-name').textContent = meta.name;
+            card.querySelector('.tool-version-slot').outerHTML = versionMarkup || '<span class="tool-version-slot"></span>';
+            card.querySelector('.tool-desc-list').innerHTML = descItemsMarkup;
+        }
+
+        async function renderTools() {
+            const grid = document.getElementById('toolsGrid');
+            const counter = document.getElementById('toolCounter');
+
+            grid.innerHTML = '';
+            counter.textContent = `${toolDirs.length} ${toolDirs.length === 1 ? 'Tool' : 'Tools'}`;
+
+            // 1) Render shells immediately for every tool (grid + iframe preview show right away)
+            const cards = toolDirs.map(dir => {
+                const toolUrl = `./${dir}`;    // ./${dir}/index.html
+                const card = createCardShell(dir, toolUrl);
+                grid.appendChild(card);
+                return { dir, toolUrl, card };
+            });
+
+            // 2) Fetch + parse each sub-tool's index.html in parallel, fill in as each resolves
+            await Promise.all(cards.map(async ({ dir, toolUrl, card }) => {
+                try {
+                    const res = await fetch(toolUrl);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const html = await res.text();
+                    const meta = parseToolMeta(html, dir);
+                    fillCard(card, meta);
+                } catch (err) {
+                    card.classList.remove('is-loading');
+                    card.classList.add('is-error');
+                    card.querySelector('.tool-name').textContent = dir;
+                    card.querySelector('.tool-desc-list').innerHTML =
+                        `<li>無法讀取 ${toolUrl} 的中繼資料</li>`;
+                    console.error(`Failed to load metadata for "${dir}":`, err);
+                }
+            }));
+        }
+
         document.addEventListener('DOMContentLoaded', renderTools);
     </script>
 </body>
