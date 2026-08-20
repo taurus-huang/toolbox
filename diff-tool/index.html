@@ -2695,6 +2695,33 @@ document.getElementById('editor-wrap').addEventListener('cut', (e)=>{
   replaceCrossLineSelection('');
 });
 
+/* Ctrl+A / Cmd+A: each line lives in its own separate contenteditable
+   div, so the browser's native "select all" only ever reaches the single
+   div that currently has focus. Intercept it here and build a selection
+   that spans from the very first line's content to the very last line's
+   content in that same column, so it behaves like selecting the whole
+   file instead of just one line. */
+document.getElementById('editor-wrap').addEventListener('keydown', (e)=>{
+  if((e.key !== 'a' && e.key !== 'A') || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+  const el = e.target.closest && e.target.closest('.content[contenteditable="true"]');
+  if(!el) return;
+
+  const col = el.dataset.col;
+  const container = document.getElementById('lines-' + col);
+  if(!container) return;
+  const allContents = Array.from(container.querySelectorAll('.content[contenteditable="true"]'));
+  if(!allContents.length) return;
+
+  e.preventDefault();
+  const first = allContents[0];
+  const last = allContents[allContents.length - 1];
+  const sel = window.getSelection();
+  if(!sel) return;
+  try{
+    sel.setBaseAndExtent(first, 0, last, last.childNodes.length);
+  }catch(err){ /* ignore */ }
+});
+
 /* Click on gutter -> jump to proportional file position
    If click lands on a marker, jump to that diff block;
    otherwise jump to the proportional row in the file. */
