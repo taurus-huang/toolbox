@@ -1810,20 +1810,37 @@ function onContentInput(e){
    Undo / Redo
    ====================================================================== */
 
+// Before an undo/redo re-diff, capture where the caret currently is (same
+// approach as onContentInput) so recompute() can put the view and caret
+// back afterward instead of jumping to the first diff / top of file.
+function captureCaretForRecompute(col){
+  const focusEl = document.activeElement;
+  if(focusEl && focusEl.classList && focusEl.classList.contains('content') && focusEl.dataset.col === col){
+    const row = parseInt(focusEl.dataset.row, 10);
+    const cell = !Number.isNaN(row) && state.rows[row] ? state.rows[row][col] : null;
+    if(cell){
+      return { col, lineIdx: cell.idx, offset: getCaretCharOffset(focusEl) };
+    }
+  }
+  return null;
+}
+
 function undo(col){
   const c = state.cols[col];
   if(c.history.length===0) { setStatus(`${colLabel(col)}: nothing to undo`); return; }
+  const restoreCaret = captureCaretForRecompute(col);
   c.future.push(c.text);
   c.text = c.history.pop();
-  recompute();
+  recompute({keepView:true, restoreCaret});
   setStatus(`Undone — ${colLabel(col)}`);
 }
 function redo(col){
   const c = state.cols[col];
   if(c.future.length===0) { setStatus(`${colLabel(col)}: nothing to redo`); return; }
+  const restoreCaret = captureCaretForRecompute(col);
   c.history.push(c.text);
   c.text = c.future.pop();
-  recompute();
+  recompute({keepView:true, restoreCaret});
   setStatus(`Redone — ${colLabel(col)}`);
 }
 function colLabel(col){ return col==='left'?'Left':col==='mid'?'Middle':'Right'; }
