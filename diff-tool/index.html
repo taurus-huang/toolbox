@@ -339,6 +339,20 @@
     z-index:50;
   }
 
+  /* Placeholder shown in a pane's content area before any file has been
+     loaded into that column; disappears automatically once a file loads. */
+  .pane-empty-hint{
+    position:absolute;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    color:var(--muted);
+    font-size:14px;
+    pointer-events:none;
+    z-index:1;
+  }
+
   /* Intra-line character diff highlight */
   .line.diff-mod .char-diff{
     background:rgba(180,140,0,0.35);
@@ -380,7 +394,7 @@
 <div class="pathbar" id="pathbar">
   <div class="pathrow">
     <div class="col-label">
-      <input type="text" id="path-left" placeholder="Left file path..." readonly>
+      <input type="text" id="path-left" placeholder="Left file" readonly>
       <div class="filebtns">
         <button class="tbtn" data-act="undo" data-col="left" title="Undo">↩️</button>
         <button class="tbtn" data-act="redo" data-col="left" title="Redo">↪️</button>
@@ -396,7 +410,7 @@
       <button class="swap-btn" data-swap-a="left" data-swap-b="right" title="Swap left and right files">↔️</button>
     </div>
     <div class="col-label" id="pathcol-mid">
-      <input type="text" id="path-mid" placeholder="Middle file path..." readonly>
+      <input type="text" id="path-mid" placeholder="Middle file" readonly>
       <div class="filebtns">
         <button class="tbtn" data-act="undo" data-col="mid" title="Undo">↩️</button>
         <button class="tbtn" data-act="redo" data-col="mid" title="Redo">↪️</button>
@@ -409,7 +423,7 @@
       <button class="swap-btn" data-swap-a="mid" data-swap-b="right" title="Swap middle and right files">↔️</button>
     </div>
     <div class="col-label">
-      <input type="text" id="path-right" placeholder="Right file path..." readonly>
+      <input type="text" id="path-right" placeholder="Right file" readonly>
       <div class="filebtns">
         <button class="tbtn" data-act="undo" data-col="right" title="Undo">↩️</button>
         <button class="tbtn" data-act="redo" data-col="right" title="Redo">↪️</button>
@@ -427,14 +441,17 @@
   <div class="gutter" id="gutter-lm"><div class="gutter-track" id="gutter-lm-track"></div></div>
   <div class="pane" id="pane-left">
     <div class="pane-scroll" id="scroll-left"><div id="lines-left"></div></div>
+    <div class="pane-empty-hint" id="empty-left">Drag and drop a file here</div>
   </div>
   <div class="connector" id="connector-lm"><svg class="connector-svg" id="connector-lm-svg"></svg></div>
   <div class="pane" id="pane-mid">
     <div class="pane-scroll" id="scroll-mid"><div id="lines-mid"></div></div>
+    <div class="pane-empty-hint" id="empty-mid">Drag and drop a file here</div>
   </div>
   <div class="connector" id="connector-mr"><svg class="connector-svg" id="connector-mr-svg"></svg></div>
   <div class="pane" id="pane-right">
     <div class="pane-scroll" id="scroll-right"><div id="lines-right"></div></div>
+    <div class="pane-empty-hint" id="empty-right">Drag and drop a file here</div>
   </div>
   <div class="gutter" id="gutter-mr"><div class="gutter-track" id="gutter-mr-track"></div></div>
 </div>
@@ -937,6 +954,17 @@ function updateEditButtonStates(){
     const redoBtn = document.querySelector(`.tbtn[data-act="redo"][data-col="${col}"]`);
     if(undoBtn) undoBtn.disabled = !c || c.history.length===0;
     if(redoBtn) redoBtn.disabled = !c || c.future.length===0;
+  });
+  updatePaneEmptyHints();
+}
+
+/* Show the "Drag and drop a file here" hint in a pane's content area only
+   until a file has actually been loaded into that column; it disappears
+   automatically once userLoaded flips true. */
+function updatePaneEmptyHints(){
+  ['left','mid','right'].forEach(col=>{
+    const hint = document.getElementById(`empty-${col}`);
+    if(hint) hint.classList.toggle('hidden', !!state.cols[col].userLoaded);
   });
 }
 
