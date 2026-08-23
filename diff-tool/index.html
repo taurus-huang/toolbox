@@ -32,6 +32,46 @@
     --btn-bg:#d8dae0;
     --btn-hover:#c8cad2;
     --gutter-bg:#e8eaee;
+    --input-bg:#f8f9fb;
+    --input-readonly-bg:#e1e3e6;
+    --swap-cell-bg:#E8EAEE;
+    --scrollbar-track:#e5e5e5;
+    --scrollbar-thumb:#b0b4bc;
+    --scrollbar-thumb-hover:#9096a0;
+    --empty-stripe:rgba(0,0,0,0.03);
+    --checkbox-bg:#c8cad0;
+    --checkbox-text:#1e1f22;
+  }
+  html[data-theme="dark"]{
+    --bg:#1c1d21;
+    --panel:#232428;
+    --toolbar:#2b2c31;
+    --border:#3d3e44;
+    --text:#e7e8ec;
+    --muted:#9a9da6;
+    --accent:#3b82f6;
+    --line-num:#8a8d96;
+    --diff-mod:#e0d200;
+    --diff-mod-border:#b8ac00;
+    --diff-add:#5fd576;
+    --diff-add-border:#3f9c50;
+    --diff-del:#ff7a70;
+    --diff-del-border:#c9463a;
+    --diff-mod-line:#3a3510;
+    --diff-add-line:#173a1d;
+    --diff-del-line:#3a1a17;
+    --btn-bg:#3a3b41;
+    --btn-hover:#46474e;
+    --gutter-bg:#28292e;
+    --input-bg:#2a2b30;
+    --input-readonly-bg:#232428;
+    --swap-cell-bg:#2b2c31;
+    --scrollbar-track:#26272b;
+    --scrollbar-thumb:#4a4c54;
+    --scrollbar-thumb-hover:#5a5c66;
+    --empty-stripe:rgba(255,255,255,0.04);
+    --checkbox-bg:#3a3b41;
+    --checkbox-text:#e7e8ec;
   }
   *{box-sizing:border-box;}
   html,body{height:100%;margin:0;font-family:"Segoe UI","Microsoft JhengHei",sans-serif;background:var(--bg);color:var(--text);font-size:13px;}
@@ -86,12 +126,12 @@
     flex-basis:38px;
   }
   .pathrow input[type=text]{
-    flex:1;background:#f8f9fb;border:1px solid var(--border);color:var(--text);
+    flex:1;background:var(--input-bg);border:1px solid var(--border);color:var(--text);
     padding:4px 6px;border-radius:3px;font-size:12px;min-width:0;
   }
   /* Read-only path row style: use gray background */
   .pathrow input[type=text][readonly]{
-    background:#e1e3e6;
+    background:var(--input-readonly-bg);
     cursor:text;
   }
   .pathrow .filebtns{display:flex;gap:2px;flex-shrink:0;}
@@ -103,7 +143,7 @@
      other toolbar button, instead of filling the cell edge-to-edge. */
   .pathrow .swap-cell{
     flex-shrink:0;width:40px;align-self:stretch;
-    background:#E8EAEE;border-left:1px solid var(--border);border-right:1px solid var(--border);
+    background:var(--swap-cell-bg);border-left:1px solid var(--border);border-right:1px solid var(--border);
     display:flex;align-items:center;justify-content:center;
   }
   .pathrow .swap-btn{
@@ -126,9 +166,9 @@
     flex:1;overflow-y:auto;overflow-x:auto;position:relative;font-family:Consolas,"Courier New",monospace;font-size:13px;line-height:20px;
   }
   .pane-scroll::-webkit-scrollbar{width:12px;height:12px;}
-  .pane-scroll::-webkit-scrollbar-track{background:#e5e5e5;}
-  .pane-scroll::-webkit-scrollbar-thumb{background:#b0b4bc;border-radius:6px;}
-  .pane-scroll::-webkit-scrollbar-thumb:hover{background:#9096a0;}
+  .pane-scroll::-webkit-scrollbar-track{background:var(--scrollbar-track);}
+  .pane-scroll::-webkit-scrollbar-thumb{background:var(--scrollbar-thumb);border-radius:6px;}
+  .pane-scroll::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-thumb-hover);}
   /* Scrollbar end arrow buttons (Chromium/WebKit only). Clicking or holding
      one nudges the pane by the browser's normal small scroll-button
      increment, same as a typical OS scrollbar's end arrows. */
@@ -172,7 +212,7 @@
     flex:1;padding:0 8px;white-space:pre;outline:none;line-height:20px;min-height:20px;
     cursor:text;min-width:0;
   }
-  .line.empty .content{background:repeating-linear-gradient(45deg, rgba(0,0,0,0.03) 0px, rgba(0,0,0,0.03) 4px, transparent 4px, transparent 8px);}
+  .line.empty .content{background:repeating-linear-gradient(45deg, var(--empty-stripe) 0px, var(--empty-stripe) 4px, transparent 4px, transparent 8px);}
   .line.empty .num{color:transparent;}
 
   /* Gap marker: shown between two real lines to mark where content was
@@ -253,8 +293,8 @@
     user-select:none;
   }
   .actbtn{
-    width:18px;height:18px;border-radius:3px;background:#c8cad0;border:1px solid var(--border);
-    color:#1e1f22;display:flex;align-items:center;justify-content:center;font-size:11px;
+    width:18px;height:18px;border-radius:3px;background:var(--checkbox-bg);border:1px solid var(--border);
+    color:var(--checkbox-text);display:flex;align-items:center;justify-content:center;font-size:11px;
     cursor:pointer;line-height:1;padding:0;
   }
   .actbtn:hover{background:var(--accent);}
@@ -271,14 +311,14 @@
 
   /* Gutter (between panes) showing overview diff markers - fixed minimap */
   .gutter{
-    width:30px;flex-shrink:0;background:#E8EAEE;border-left:1px solid var(--border);border-right:1px solid var(--border);
+    width:30px;flex-shrink:0;background:var(--swap-cell-bg);border-left:1px solid var(--border);border-right:1px solid var(--border);
     position:relative;overflow:hidden;cursor:pointer;
   }
   /* Connector strip between panes: no color fill, just lines linking the
      diff regions on the left side of the strip to the same regions on the
      right side, following each pane's current vertical scroll position. */
   .connector{
-    width:24px;flex-shrink:0;background:#E8EAEE;border-left:1px solid var(--border);border-right:1px solid var(--border);
+    width:24px;flex-shrink:0;background:var(--swap-cell-bg);border-left:1px solid var(--border);border-right:1px solid var(--border);
     position:relative;overflow:hidden;
   }
   .connector-svg{position:absolute;left:0;top:0;width:100%;height:100%;}
@@ -391,6 +431,13 @@
   </div>
   <div class="group">
     <button class="tbtn" id="btn-recompute" title="Re-run diff"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><path fill="#fff" d="M17.65,6.35C16.2,4.9,14.21,4,12,4c-4.42,0-7.99,3.58-7.99,8s3.57,8,7.99,8c3.73,0,6.84-2.55,7.73-6h-2.08c-0.82,2.33-3.04,4-5.65,4c-3.31,0-6-2.69-6-6s2.69-6,6-6c1.66,0,3.14,0.69,4.22,1.78L13,11h7V4L17.65,6.35z"/></svg> Re-diff</button>
+  </div>
+  <div class="group" style="margin-left:auto;border-right:none;">
+    <button class="tbtn" id="btn-theme" title="Toggle light / dark mode">
+      <svg id="icon-theme-sun" viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><circle cx="12" cy="12" r="4" fill="#fff"/><g stroke="#fff" stroke-width="1.8" stroke-linecap="round"><line x1="12" y1="2.8" x2="12" y2="5.3"/><line x1="12" y1="18.7" x2="12" y2="21.2"/><line x1="2.8" y1="12" x2="5.3" y2="12"/><line x1="18.7" y1="12" x2="21.2" y2="12"/><line x1="5.4" y1="5.4" x2="7.2" y2="7.2"/><line x1="16.8" y1="16.8" x2="18.6" y2="18.6"/><line x1="5.4" y1="18.6" x2="7.2" y2="16.8"/><line x1="16.8" y1="7.2" x2="18.6" y2="5.4"/></g></svg>
+      <svg id="icon-theme-moon" viewBox="0 0 24 24" style="display:none;"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><circle cx="12" cy="12" r="7" fill="#fff"/><circle cx="15" cy="9" r="6" fill="#739EEB"/></svg>
+      <span id="theme-label">Light</span>
+    </button>
   </div>
 </div>
 
@@ -2869,6 +2916,44 @@ window.addEventListener('resize', ()=>{
   rebuildColumnLayouts();
   renderGutters();
 });
+
+/* ======================================================================
+   Light / Dark theme toggle
+   ====================================================================== */
+(function(){
+  const htmlEl = document.documentElement;
+  const btn = document.getElementById('btn-theme');
+  const iconSun = document.getElementById('icon-theme-sun');
+  const iconMoon = document.getElementById('icon-theme-moon');
+  const label = document.getElementById('theme-label');
+
+  function applyTheme(theme){
+    if(theme === 'dark'){
+      htmlEl.setAttribute('data-theme','dark');
+      iconSun.style.display = 'none';
+      iconMoon.style.display = '';
+      label.textContent = 'Dark';
+      btn.title = 'Switch to light mode';
+    } else {
+      htmlEl.removeAttribute('data-theme');
+      iconSun.style.display = '';
+      iconMoon.style.display = 'none';
+      label.textContent = 'Light';
+      btn.title = 'Switch to dark mode';
+    }
+  }
+
+  let saved = null;
+  try{ saved = localStorage.getItem('difftool-theme'); }catch(e){ /* ignore */ }
+  applyTheme(saved ? saved : 'dark');
+
+  btn.addEventListener('click', ()=>{
+    const isDark = htmlEl.getAttribute('data-theme') === 'dark';
+    const next = isDark ? 'light' : 'dark';
+    applyTheme(next);
+    try{ localStorage.setItem('difftool-theme', next); }catch(e){ /* ignore */ }
+  });
+})();
 </script>
 </body>
 </html>
