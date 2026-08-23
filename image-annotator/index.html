@@ -2213,6 +2213,18 @@ function addImageAsObject(src) {
   img.crossOrigin = "anonymous";
   img.onload = () => {
     const nw = img.naturalWidth, nh = img.naturalHeight;
+    // If there's no base image yet (still on the default blank canvas),
+    // size the canvas to match the pasted image instead of centering it
+    // inside the default-sized blank canvas.
+    if (!hasImage) {
+      baseCanvas = document.createElement("canvas");
+      baseCanvas.width = nw;
+      baseCanvas.height = nh;
+      worldW = nw; worldH = nh;
+      hasImage = true;
+      canvas.classList.remove("empty");
+      fitCanvasToStage();
+    }
     const w = nw, h = nh;
     const x = (baseCanvas.width - w) / 2;
     const y = (baseCanvas.height - h) / 2;
