@@ -2130,6 +2130,40 @@ function exportPNG() {
   a.click();
 }
 
+// ---------- Clipboard: selected object copy / paste ----------
+// When an object is selected, Ctrl+C copies that object (not the whole
+// canvas) to the clipboard, and Ctrl+V pastes it back as a new object.
+// An in-memory fallback is kept in case the system clipboard read/write
+// is unavailable or blocked by the browser.
+const APP_CLIPBOARD_MARKER = "__appClipboardObject__";
+let appClipboardObject = null;
+
+async function copySelectedObjectToClipboard() {
+  const o = state.objects.find((x) => x.id === state.selectedId);
+  if (!o) return;
+  appClipboardObject = JSON.parse(JSON.stringify(o));
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    const payload = JSON.stringify({ marker: APP_CLIPBOARD_MARKER, object: appClipboardObject });
+    try {
+      await navigator.clipboard.writeText(payload);
+    } catch (err) {
+      // Ignore: the in-memory fallback above still lets Ctrl+V work.
+    }
+  }
+}
+
+function pasteObjectData(data) {
+  if (!data || data.marker !== APP_CLIPBOARD_MARKER || !data.object) return false;
+  const copy = JSON.parse(JSON.stringify(data.object));
+  copy.id = uid();
+  if (isBox(copy)) { copy.x += 20; copy.y += 20; } else { copy.x1 += 20; copy.y1 += 20; copy.x2 += 20; copy.y2 += 20; }
+  if (copy.type === "number") copy.number = state.nextNumber++;
+  state.objects.push(copy);
+  state.selectedId = copy.id;
+  pushHistory(); render(); buildProps();
+  return true;
+}
+
 // ---------- Clipboard image copy / paste ----------
 async function copyImageToClipboard() {
   if (!baseCanvas) return;
@@ -2259,6 +2293,17 @@ stage.addEventListener("wheel", (e) => {
 window.addEventListener("paste", (e) => {
   const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || "");
   if (typing) return; // let normal text paste happen in inputs/textareas
+  // First: a previously-copied object (from Ctrl+C on a selection) encoded
+  // as JSON text on the clipboard.
+  const text = e.clipboardData?.getData("text/plain");
+  if (text) {
+    try {
+      const data = JSON.parse(text);
+      if (pasteObjectData(data)) { e.preventDefault(); return; }
+    } catch (err) {
+      // Not our object JSON; fall through to image handling below.
+    }
+  }
   const items = e.clipboardData?.items || [];
   for (const it of items) {
     if (it.type.startsWith("image/")) {
@@ -2267,8 +2312,14 @@ window.addEventListener("paste", (e) => {
       const r = new FileReader();
       r.onload = () => addImageAsObject(r.result);
       r.readAsDataURL(f);
-      break;
+      return;
     }
+  }
+  // Fallback: the system clipboard didn't have our object JSON (e.g. the
+  // browser blocked navigator.clipboard.writeText) — use the in-memory
+  // copy captured by copySelectedObjectToClipboard(), if any.
+  if (appClipboardObject && pasteObjectData({ marker: APP_CLIPBOARD_MARKER, object: appClipboardObject })) {
+    e.preventDefault();
   }
 });
 
@@ -2278,10 +2329,17 @@ window.addEventListener("keydown", (e) => {
   if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="z") { e.preventDefault(); e.shiftKey?redo():undo(); return; }
   if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="y") { e.preventDefault(); redo(); return; }
   if (typing) return;
-  if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="c") { e.preventDefault(); copyImageToClipboard(); return; }
+  if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="c") {
+    e.preventDefault();
+    if (state.selectedId) copySelectedObjectToClipboard(); else copyImageToClipboard();
+    return;
+  }
   // Note: Ctrl+V is intentionally NOT intercepted here — it's handled by the
   // native "paste" event listener below, which reads clipboardData directly
   // and does not trigger the browser's clipboard-read permission prompt.
+  // That listener first tries to paste a copied object (see
+  // copySelectedObjectToClipboard/pasteObjectData above), falling back to
+  // pasting an image from the clipboard, same as before.
   if ((e.key==="Delete"||e.key==="Backspace") && state.selectedId) {
     e.preventDefault();
     const o = state.objects.find(x=>x.id===state.selectedId);
