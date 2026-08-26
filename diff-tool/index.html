@@ -697,15 +697,21 @@ function buildRows2(leftLines, rightLines){
 }
 
 /* Determine the "status" of a row for each column: 'equal','mod','add','del' */
-/* Whether mid should be treated as "not participating" in the 3-way diff.
-   This is only true once the user has actually loaded left or right but not
-   mid (a meaningful left-vs-right preview). In the true default state,
-   where nothing has been loaded anywhere, this returns false so all three
-   columns get a normal 3-way comparison and behave consistently. */
+/* Previously this returned true whenever mid hadn't been loaded but left
+   or right had -- most notably right after switching from a working 2-way
+   compare into 3-way mode, where mid is still blank. That special-cased
+   mid to a "not participating" / neutral state and fell back to a plain
+   left-vs-right preview, which left mid's column (and the left<->mid and
+   mid<->right gutters and merge buttons) showing an incorrect "equal"
+   status instead of correctly reflecting that mid is empty -- and
+   therefore genuinely different from any non-empty left/right content.
+   Always treating mid as a normal, real participating column (even when
+   it's empty) means recompute(), classifyRow(), and pairDiffType() all run
+   their standard 3-way comparison logic against mid's actual content, so
+   left<->mid and mid<->right are correctly (re)diffed any time mode or
+   content changes, including immediately after a 2-way -> 3-way switch. */
 function isMidEmpty(){
-  const midHasContent = state.cols.mid.userLoaded && state.cols.mid.text.trim() !== '';
-  if(midHasContent) return false;
-  return !!(state.cols.left.userLoaded || state.cols.right.userLoaded);
+  return false;
 }
 
 function classifyRow(row, mode){
@@ -949,6 +955,24 @@ function buildPairBlocks(colA, colB){
 function recompute(opts){
   const keepView = !!(opts && opts.keepView);
   const restoreCaret = opts && opts.restoreCaret;
+
+  // state.cursorRow/cursorCol/cursorGapAnchor are indices into state.rows,
+  // which this function is about to rebuild from scratch. Whenever a
+  // recompute isn't accompanied by a restoreCaret request (i.e. it's a
+  // structural change like loading a new file, switching 2-way/3-way
+  // mode, swapping columns, or refreshing from disk -- not an in-place
+  // edit that explicitly wants its caret relocated), the old row index
+  // has no guaranteed relationship to the newly rebuilt rows. Left in
+  // place, it can coincidentally still point at a real cell in the new
+  // alignment and cause a stale "current line" highlight to appear on a
+  // line the user never actually put their cursor on. Clear it so
+  // render() doesn't paint a leftover highlight from before the rebuild.
+  if(!restoreCaret){
+    state.cursorRow = null;
+    state.cursorCol = null;
+    state.cursorGapAnchor = null;
+  }
+
   let savedScroll = null;
   if(keepView){
     savedScroll = {};
@@ -1318,7 +1342,15 @@ function renderColumn(col){
     const cell = row[col];
     const cls = row._cls;
     const status = cls ? cls[col] : 'equal';
-    const isCurrent = (i===state.diffBlocks[state.currentDiffIndex]?.start);
+    // "Current diff" navigation highlight: only meaningful on a column that
+    // actually differs at this row. state.diffBlocks groups rows where ANY
+    // column differs, so a block's start row can still be 'equal' for a
+    // given column (e.g. the right column when only left/mid changed) --
+    // marking that column's line as the "current diff" too would draw the
+    // highlight on unrelated, unchanged content. Restrict it to columns
+    // whose own status here isn't 'equal', mirroring how blockStartRows/
+    // blockEndRows above already scope themselves per column.
+    const isCurrent = (i===state.diffBlocks[state.currentDiffIndex]?.start) && status !== 'equal';
     const inDiffRun = !!(cls && cls.anyDiff);
 
     if(!inDiffRun){
@@ -1405,8 +1437,17 @@ function renderColumn(col){
     if(blockStartRows.has(i)) lineClasses += ' diff-block-start';
     if(blockEndRows.has(i)) lineClasses += ' diff-block-end';
 
-    if(cls && cls.anyDiff){
-      if(status !== 'equal' && status !== lastRunStatus){
+    // Only this column's OWN status matters here: cls.anyDiff just means
+    // *some* column in this row differs, which for a 3-way row can be true
+    // even while THIS column's content is identical to the mid/base value
+    // (e.g. left===mid but right differs from mid). Gating on cls.anyDiff
+    // alone used to show a merge/delete button on a line that has no visual
+    // diff marker at all -- a no-op "merge" and a delete button with
+    // nothing distinguishing it as part of the diff. Requiring
+    // status!=='equal' too means a column only gets a button on rows where
+    // it genuinely has something to merge or delete.
+    if(cls && cls.anyDiff && status !== 'equal'){
+      if(status !== lastRunStatus){
         // Type changed since the last segment (e.g. this "modified" line
         // comes right after a "deleted" gap) -- it starts a new visual
         // segment of its own and should get its own button set.
@@ -1422,7 +1463,7 @@ function renderColumn(col){
         actionsHtml = buildActionButtons(i, col, effHasLeftPane, effHasRightPane);
         shownButtonForRun = true;
       }
-      if(status !== 'equal') lastRunStatus = status;
+      lastRunStatus = status;
     }
 
     html += `<div class="${lineClasses}" data-row="${i}" data-col="${col}">`
