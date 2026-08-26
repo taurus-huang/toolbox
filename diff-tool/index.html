@@ -2706,6 +2706,15 @@ document.getElementById('editor-wrap').addEventListener('beforeinput', (e)=>{
   // extend the selection from that same point, like a normal text editor.
   let anchorNode = null, anchorOffset = 0, anchorCol = null;
 
+  // Latest raw pointer position, updated on every mousemove while
+  // selecting. Read by the auto-scroll frame loop below rather than
+  // driving selection directly from the mousemove event, so that holding
+  // the pointer still at the pane's edge keeps scrolling (and extending
+  // the selection) frame after frame, the same as a native text editor --
+  // not just on the moves that happen to occur.
+  let lastClientX = 0, lastClientY = 0;
+  let autoScrollHandle = null;
+
   const editorWrapEl = document.getElementById('editor-wrap');
 
   function caretFromPoint(x, y){
@@ -2730,9 +2739,76 @@ document.getElementById('editor-wrap').addEventListener('beforeinput', (e)=>{
     }catch(err){ /* point briefly resolved to an invalid range mid-drag; ignore */ }
   }
 
+  function scrollElForCol(col){
+    if(col === 'left') return document.getElementById('scroll-left');
+    if(col === 'mid') return document.getElementById('scroll-mid');
+    if(col === 'right') return document.getElementById('scroll-right');
+    return null;
+  }
+
+  // Edge-scroll tuning: within EDGE_MARGIN px of the pane's inner edge,
+  // scroll speed ramps up from near-zero to MAX_SPEED; once the pointer
+  // is actually outside the pane, speed stays pinned at MAX_SPEED (scaled
+  // slightly further by how far outside it is, capped) so dragging far
+  // past the edge doesn't feel any different from a native editor.
+  const EDGE_MARGIN = 34;
+  const MAX_SPEED = 24;
+
+  function edgeSpeed(pos, nearEdge, farEdge, sign){
+    // sign: -1 => this is the "start" edge (top/left), scrolling should
+    // be negative when triggered; +1 => "end" edge (bottom/right).
+    if(sign < 0){
+      if(pos >= nearEdge) return 0;
+      if(pos <= farEdge) return -MAX_SPEED;
+      const t = 1 - (pos - farEdge) / (nearEdge - farEdge);
+      return -Math.max(2, Math.round(MAX_SPEED * t));
+    } else {
+      if(pos <= nearEdge) return 0;
+      if(pos >= farEdge) return MAX_SPEED;
+      const t = 1 - (farEdge - pos) / (farEdge - nearEdge);
+      return Math.max(2, Math.round(MAX_SPEED * t));
+    }
+  }
+
+  function autoScrollTick(){
+    if(!isSelecting){ autoScrollHandle = null; return; }
+    const scrollEl = scrollElForCol(anchorCol);
+    if(scrollEl){
+      const rect = scrollEl.getBoundingClientRect();
+
+      const dy = lastClientY < rect.top + EDGE_MARGIN
+        ? edgeSpeed(lastClientY, rect.top + EDGE_MARGIN, rect.top - EDGE_MARGIN, -1)
+        : edgeSpeed(lastClientY, rect.bottom - EDGE_MARGIN, rect.bottom + EDGE_MARGIN, 1);
+      const dx = lastClientX < rect.left + EDGE_MARGIN
+        ? edgeSpeed(lastClientX, rect.left + EDGE_MARGIN, rect.left - EDGE_MARGIN, -1)
+        : edgeSpeed(lastClientX, rect.right - EDGE_MARGIN, rect.right + EDGE_MARGIN, 1);
+
+      if(dy) scrollEl.scrollTop += dy;
+      if(dx) scrollEl.scrollLeft += dx;
+
+      // Extend the selection every frame (not just on scroll) so a
+      // stationary pointer inside the pane still tracks smoothly, and
+      // clamp the point used for hit-testing to just inside the pane so
+      // a pointer that has wandered outside it (above/below/left/right)
+      // still resolves to a real caret at that boundary, expanding the
+      // selection right up to the newly-scrolled-in content.
+      const px = Math.min(Math.max(lastClientX, rect.left + 1), rect.right - 1);
+      const py = Math.min(Math.max(lastClientY, rect.top + 1), rect.bottom - 1);
+      extendTo(px, py);
+    }
+    autoScrollHandle = requestAnimationFrame(autoScrollTick);
+  }
+
   function startSelecting(){
     isSelecting = true;
     editorWrapEl.classList.add('is-selecting');
+    if(autoScrollHandle === null) autoScrollHandle = requestAnimationFrame(autoScrollTick);
+  }
+
+  function stopSelecting(){
+    isSelecting = false;
+    editorWrapEl.classList.remove('is-selecting');
+    if(autoScrollHandle !== null){ cancelAnimationFrame(autoScrollHandle); autoScrollHandle = null; }
   }
 
   editorWrapEl.addEventListener('mousedown', (e)=>{
@@ -2740,6 +2816,8 @@ document.getElementById('editor-wrap').addEventListener('beforeinput', (e)=>{
     if(e.detail > 1) return; // let native double/triple-click word/line selection behave normally
     const contentEl = e.target.closest('.content[contenteditable="true"]');
     if(!contentEl || e.target.closest('.actbtn')) return;
+
+    lastClientX = e.clientX; lastClientY = e.clientY;
 
     if(e.shiftKey && anchorNode && anchorCol === contentEl.dataset.col){
       // Shift+click: keep the existing anchor and just extend the
@@ -2774,18 +2852,17 @@ document.getElementById('editor-wrap').addEventListener('beforeinput', (e)=>{
 
   document.addEventListener('mousemove', (e)=>{
     if(!isSelecting || !anchorNode) return;
-    const overEl = document.elementFromPoint(e.clientX, e.clientY);
-    const contentEl = overEl && overEl.closest && overEl.closest('.content[contenteditable="true"]');
-    // Only extend the selection while the drag stays within the same
-    // pane/column -- crossing into another pane isn't a meaningful
-    // selection here, so just leave the last valid selection as-is.
-    if(!contentEl || contentEl.dataset.col !== anchorCol) return;
-    extendTo(e.clientX, e.clientY);
+    lastClientX = e.clientX; lastClientY = e.clientY;
+    // The auto-scroll frame loop (started on mousedown) reads
+    // lastClientX/Y every frame and both scrolls the pane when the
+    // pointer is near/past its edge and extends the selection
+    // accordingly, so no direct extendTo() call is needed here -- that
+    // keeps a single code path for both in-bounds dragging and
+    // edge/out-of-bounds dragging instead of two that can disagree.
   });
 
   document.addEventListener('mouseup', ()=>{
-    isSelecting = false;
-    editorWrapEl.classList.remove('is-selecting');
+    stopSelecting();
   });
 })();
 
