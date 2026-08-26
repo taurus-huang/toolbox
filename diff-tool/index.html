@@ -24,11 +24,11 @@
     --diff-mod-border:#c8c800;
     --diff-add:#1a7a2a;
     --diff-add-border:#4caf50;
-    --diff-del:#b02020;
-    --diff-del-border:#f44336;
+    --diff-del:#3d6fa5;
+    --diff-del-border:#4a7ec2;
     --diff-mod-line:#fffde6;
     --diff-add-line:#e8f5e9;
-    --diff-del-line:#ffebee;
+    --diff-del-line:#e8eef5;
     --btn-bg:#d8dae0;
     --btn-hover:#c8cad2;
     --gutter-bg:#e8eaee;
@@ -56,11 +56,11 @@
     --diff-mod-border:#b8ac00;
     --diff-add:#5fd576;
     --diff-add-border:#3f9c50;
-    --diff-del:#ff7a70;
-    --diff-del-border:#c9463a;
+    --diff-del:#7fa3cc;
+    --diff-del-border:#5a84b8;
     --diff-mod-line:#3a3510;
     --diff-add-line:#173a1d;
-    --diff-del-line:#3a1a17;
+    --diff-del-line:#1c2a3a;
     --btn-bg:#3a3b41;
     --btn-hover:#46474e;
     --gutter-bg:#15161B;
@@ -529,9 +529,6 @@
 <!-- ============ STATUS BAR ============ -->
 <div class="statusbar">
   <div class="legend">
-    <span><span class="swatch mod"></span> Modified</span>
-    <span><span class="swatch add"></span> Added</span>
-    <span><span class="swatch del"></span> Deleted</span>
     <span id="diff-counter">Diff: 0 / 0</span>
   </div>
   <div id="status-text">Ready</div>
@@ -1144,7 +1141,6 @@ function buildActionButtons(rowIdx, col, hasLeftPane, hasRightPane){
   if(hasRightPane){
     html += `<button class="actbtn" data-action="copy-right" data-row="${rowIdx}" data-col="${col}" title="Merge to right"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><rect x="6" y="11" width="9" height="2" fill="#fff"/><polygon points="20,12 14,7 14,17" fill="#fff"/></svg></button>`;
   }
-  html += `<button class="actbtn" data-action="delete-block" data-row="${rowIdx}" data-col="${col}" title="Delete this diff block"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="#e03131" stroke-width="2.6" stroke-linecap="round"/></svg></button>`;
   html += '</div>';
   return html;
 }
