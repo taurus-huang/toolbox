@@ -41,6 +41,7 @@
     --empty-stripe:rgba(0,0,0,0.03);
     --checkbox-bg:#c8cad0;
     --checkbox-text:#1e1f22;
+    --current-line-bg:rgba(37,112,194,0.08);
   }
   html[data-theme="dark"]{
     --bg:#1F222A;
@@ -72,6 +73,7 @@
     --empty-stripe:rgba(255,255,255,0.04);
     --checkbox-bg:#3a3b41;
     --checkbox-text:#e7e8ec;
+    --current-line-bg:rgba(59,130,246,0.16);
   }
   *{box-sizing:border-box;}
   html,body{height:100%;margin:0;font-family:"Segoe UI","Microsoft JhengHei",sans-serif;background:var(--bg);color:var(--text);font-size:13px;}
@@ -260,6 +262,22 @@
   .line.diff-add .num{background:var(--diff-add-border);color:#fff;}
   .line.diff-del .num{background:var(--diff-del-border);color:#fff;}
   .line.diff-current{box-shadow:inset 0 0 0 1px var(--accent);}
+
+  /* Current-line highlight: tracks where the caret actually is (separate
+     from .diff-current, which tracks the current diff block for Prev/Next
+     navigation and may be a different row). Uses a translucent inset
+     box-shadow rather than `background` so it paints as an overlay on top
+     of any diff-mod/add/del background already on the row instead of
+     replacing it, and is applied to .num/.content too for the same
+     horizontal-overflow reason as the diff line tints above. */
+  .line.current-line{box-shadow:inset 0 0 0 9999px var(--current-line-bg);}
+  .line.current-line .content{box-shadow:inset 0 0 0 9999px var(--current-line-bg);}
+  .line.current-line .num{box-shadow:inset 0 0 0 9999px var(--current-line-bg);}
+  /* Combine with .diff-current's own box-shadow when both apply to the
+     same row, instead of one overwriting the other. */
+  .line.current-line.diff-current{
+    box-shadow:inset 0 0 0 1px var(--accent), inset 0 0 0 9999px var(--current-line-bg);
+  }
 
   /* Diff block boundary lines: drawn only on the first/last row of each
      contiguous diff block (not on every row), in the color matching that
@@ -1380,6 +1398,10 @@ function renderColumn(col){
       lineClasses += ' diff-current';
     }
 
+    if(i===state.cursorRow && col===state.cursorCol){
+      lineClasses += ' current-line';
+    }
+
     if(blockStartRows.has(i)) lineClasses += ' diff-block-start';
     if(blockEndRows.has(i)) lineClasses += ' diff-block-end';
 
@@ -2350,7 +2372,15 @@ document.getElementById('editor-wrap').addEventListener('input', (e)=>{
 });
 
 /* Track where the user actually places the caret, so First/Prev/Next/Last
-   can navigate relative to it instead of an independently-stepped counter. */
+   can navigate relative to it instead of an independently-stepped counter.
+   Also drives the current-line highlight: since each line is its own
+   separate contenteditable div, moving the caret to a different line
+   always re-fires focusin on a new element, so this is enough to catch
+   every line-to-line move (click, arrow keys, Tab, etc.) without a full
+   re-render -- render() applies the same class from state.cursorRow/
+   cursorCol whenever a full re-render does happen (undo/redo, editing,
+   merge/delete, diff navigation, ...) so the highlight stays correct
+   either way. */
 document.getElementById('editor-wrap').addEventListener('focusin', (e)=>{
   const el = e.target.closest('.content[contenteditable="true"]');
   if(!el) return;
@@ -2361,8 +2391,22 @@ document.getElementById('editor-wrap').addEventListener('focusin', (e)=>{
     state.cursorCol = col;
     state.cursorGapAnchor = null;
     updateDiffNavButtonStates();
+    setCurrentLineHighlight(row, col);
   }
 });
+
+/* Move the .current-line class to the given row/col without a full
+   render() -- used for instant feedback on caret moves that don't
+   otherwise trigger a re-diff/re-render. */
+function setCurrentLineHighlight(row, col){
+  document.querySelectorAll('.line.current-line').forEach(el=>{
+    if(el.dataset.row !== String(row) || el.dataset.col !== col){
+      el.classList.remove('current-line');
+    }
+  });
+  const target = document.querySelector(`.line[data-row="${row}"][data-col="${col}"]`);
+  if(target) target.classList.add('current-line');
+}
 
 /* ======================================================================
    Keyboard Up/Down navigation: move the caret to the same horizontal
