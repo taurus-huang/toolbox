@@ -166,6 +166,18 @@
   }
   .pane-scroll{
     flex:1;overflow-y:auto;overflow-x:auto;position:relative;font-family:Consolas,"Courier New",monospace;font-size:13px;line-height:20px;
+    /* The line-number column (.num / .gap-num) is 46px wide and pinned via
+       position:sticky so it stays visually in place while the pane scrolls
+       horizontally. Without this, the browser's native "keep the caret in
+       view" scrolling (e.g. holding the Left arrow key to walk the caret
+       back toward column 1) only scrolls until the caret's own geometry
+       enters the container's bounds -- it has no idea the sticky column
+       visually covers the leftmost 46px on top of that -- so it stops
+       just short of scrollLeft:0, leaving the first character(s) of the
+       line hidden underneath the numbers. scroll-padding-left reserves
+       that same 46px so the browser keeps scrolling until the caret
+       clears it too, landing exactly at the true left edge. */
+    scroll-padding-left:46px;
   }
   .pane-scroll::-webkit-scrollbar{width:12px;height:12px;}
   .pane-scroll::-webkit-scrollbar-track{background:var(--scrollbar-track);}
