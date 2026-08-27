@@ -995,6 +995,7 @@ function render(forExport = false) {
       const o = state.objects.find((x) => x.id === state.selectedId);
       if (o) drawSelection(o);
     }
+    if (action && action.mode === "marquee") drawMarquee(action.start, action.current);
   }
 }
 
@@ -1225,6 +1226,20 @@ function drawSelection(o) {
   ctx.restore();
 }
 const HANDLE_DIRS = [[-1,-1],[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,1],[-1,0]];
+// Rubber-band marquee rectangle shown while box-selecting on empty canvas area.
+function drawMarquee(a, b) {
+  ctx.save();
+  const s = currentScale();
+  const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+  const w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
+  ctx.setLineDash([6 * s, 4 * s]);
+  ctx.lineWidth = 1.5 * s;
+  ctx.strokeStyle = "#3b82f6";
+  ctx.fillStyle = "rgba(59,130,246,0.12)";
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeRect(x, y, w, h);
+  ctx.restore();
+}
 
 // Simplified selection indicator used when multiple objects are selected at once:
 // just an outline (no resize/rotate handles, since transforms only apply per-object).
@@ -1286,6 +1301,27 @@ function distToSeg(p, o) {
   const dx = p.x - (o.x1 + t * C), dy = p.y - (o.y1 + t * D);
   return Math.hypot(dx, dy);
 }
+
+// World-space axis-aligned bounding box of an object (rotation-aware for boxes),
+// used for rubber-band marquee selection.
+function objectWorldBounds(o) {
+  if (isBox(o)) {
+    const c = boxCenter(o);
+    const hw = o.w / 2, hh = o.h / 2;
+    const corners = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([lx, ly]) => {
+      const r = rotatePt(lx, ly, o.rotation || 0);
+      return { x: c.x + r.x, y: c.y + r.y };
+    });
+    const xs = corners.map((pt) => pt.x), ys = corners.map((pt) => pt.y);
+    return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
+  } else if (isSeg(o)) {
+    return { minX: Math.min(o.x1, o.x2), minY: Math.min(o.y1, o.y2), maxX: Math.max(o.x1, o.x2), maxY: Math.max(o.y1, o.y2) };
+  }
+  return null;
+}
+function rectsIntersect(a, b) {
+  return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
+}
 function hitHandle(o, p) {
   const hs = handleSize() * 1.6;
   if (isBox(o)) {
@@ -1333,8 +1369,19 @@ function createObject(tool, p) {
 // ---------- Interaction ----------
 let action = null; // {mode, o, start, orig, handle}
 
+canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
 canvas.addEventListener("mousedown", (e) => {
   if (!baseCanvas) return; // safety guard; a blank canvas is created on load
+  if (e.button === 2) {
+    // Right mouse button always pans the view, regardless of the active tool,
+    // so left-click stays free for marquee-select / drawing / moving objects.
+    e.preventDefault();
+    const stageEl = document.getElementById("stage");
+    action = { mode: "pan", startClientX: e.clientX, startClientY: e.clientY, scrollLeft: stageEl.scrollLeft, scrollTop: stageEl.scrollTop };
+    canvas.style.cursor = "grabbing";
+    return;
+  }
   const p = toWorld(e);
   if (state.tool === "select") {
     // Resize/rotate handles only appear (and only apply) for a single selected object.
@@ -1362,12 +1409,11 @@ canvas.addEventListener("mousedown", (e) => {
       }
     } else {
       if (!ctrlKey) { selectOnly(null); buildProps(); render(); }
-      // Empty area with the select tool: pan the view by dragging, like the
-      // Acrobat "hand" tool. Only kicks in when there's no object under the
-      // cursor, so clicking/dragging objects still selects/moves them.
-      const stageEl = document.getElementById("stage");
-      action = { mode: "pan", startClientX: e.clientX, startClientY: e.clientY, scrollLeft: stageEl.scrollLeft, scrollTop: stageEl.scrollTop };
-      canvas.style.cursor = "grabbing";
+      // Empty area with the select tool: drag a rubber-band marquee to box-select
+      // multiple objects at once (Ctrl+drag adds to the existing selection).
+      // Right-click-drag pans the canvas view instead.
+      action = { mode: "marquee", start: p, current: p, additive: ctrlKey };
+      render();
     }
   } else {
     // create
@@ -1398,6 +1444,13 @@ window.addEventListener("mousemove", (e) => {
   }
   if (!action) { updateCursor(e); return; }
   const p = toWorld(e);
+
+  if (action.mode === "marquee") {
+    action.current = p;
+    render();
+    return;
+  }
+
   const dx = p.x - action.start.x, dy = p.y - action.start.y;
 
   if (action.mode === "move") {
@@ -1475,11 +1528,25 @@ function resizeBox(o, orig, h, p, shift) {
   o.x = ncx - nw / 2; o.y = ncy - nh / 2;
 }
 
-window.addEventListener("mouseup", () => {
+window.addEventListener("mouseup", (e) => {
   if (!action) return;
   if (action.mode === "pan") {
     action = null;
-    canvas.style.cursor = "grab";
+    canvas.style.cursor = "crosshair";
+    return;
+  }
+  if (action.mode === "marquee") {
+    const p = toWorld(e);
+    const rect = {
+      minX: Math.min(action.start.x, p.x), minY: Math.min(action.start.y, p.y),
+      maxX: Math.max(action.start.x, p.x), maxY: Math.max(action.start.y, p.y),
+    };
+    const hitIds = state.objects
+      .filter((o) => { const b = objectWorldBounds(o); return b && rectsIntersect(b, rect); })
+      .map((o) => o.id);
+    setSelection(action.additive ? [...state.selectedIds, ...hitIds] : hitIds);
+    action = null;
+    buildProps(); render();
     return;
   }
   const o = action.o;
@@ -1499,11 +1566,11 @@ window.addEventListener("mouseup", () => {
 });
 
 function updateCursor(e) {
-  if (!baseCanvas || state.tool !== "select") { canvas.style.cursor = state.tool === "select" ? "grab" : "crosshair"; return; }
+  if (!baseCanvas || state.tool !== "select") { canvas.style.cursor = "crosshair"; return; }
   const p = toWorld(e);
   const sel = state.objects.find((o) => o.id === state.selectedId);
   if (sel && hitHandle(sel, p)) { canvas.style.cursor = "pointer"; return; }
-  canvas.style.cursor = hitObject(p) ? "move" : "grab";
+  canvas.style.cursor = hitObject(p) ? "move" : "crosshair";
 }
 
 // ---------- Properties panel ----------
@@ -2342,7 +2409,7 @@ function addImageAsObject(src) {
 const toolbar = document.getElementById("toolbar");
 toolbar.querySelectorAll(".tool").forEach((t) => t.addEventListener("click", () => {
   state.tool = t.dataset.tool; updateToolUI();
-  canvas.style.cursor = state.tool === "select" ? "grab" : "crosshair";
+  canvas.style.cursor = "crosshair";
 }));
 function updateToolUI() {
   toolbar.querySelectorAll(".tool").forEach((t) => t.classList.toggle("active", t.dataset.tool === state.tool));
@@ -2456,7 +2523,7 @@ window.addEventListener("keydown", (e) => {
     deleteSelected();
   }
   const map = { v:"select", r:"rect", o:"ellipse", l:"line", a:"arrow", h:"highlighter", t:"text", n:"number" };
-  if (map[e.key.toLowerCase()]) { state.tool = map[e.key.toLowerCase()]; updateToolUI(); canvas.style.cursor = state.tool==="select"?"grab":"crosshair"; }
+  if (map[e.key.toLowerCase()]) { state.tool = map[e.key.toLowerCase()]; updateToolUI(); canvas.style.cursor = "crosshair"; }
   // arrow-key nudge (moves every selected object together)
   if (state.selectedIds.length && ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
     e.preventDefault();
