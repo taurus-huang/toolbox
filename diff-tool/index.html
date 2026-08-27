@@ -2277,16 +2277,55 @@ document.getElementById('file-input').addEventListener('change', (e)=>{
   e.target.value = '';
 });
 
-function saveFile(col){
+async function saveFile(col){
   const text = state.cols[col].text;
   const filename = state.cols[col].fullPath || (col+'.txt');
+  const suggestedName = filename.split(/[\\/]/).pop(); // use only the filename part as the suggested name
+
+  // Prefer the File System Access API: it pops up a real "Save As" dialog
+  // the user can navigate to any folder in, instead of always dropping
+  // the file into the browser's default Downloads folder. `id` (kept
+  // distinct per column, since left/mid/right may live in entirely
+  // different folders) hints the browser to remember the last folder for
+  // it, and startIn below explicitly reinforces that with our own
+  // remembered handle -- see the comment there for why both are used.
+  if(window.showSaveFilePicker){
+    try{
+      const opts = { suggestedName, id: 'diffmerge-save-' + col };
+      // The `id` option asks the browser to remember the last folder used
+      // for this id on its own, but that turned out not to persist
+      // reliably (this file is typically opened via file://, where
+      // picker memory scoped to `id` alone doesn't behave consistently
+      // across browsers). Explicitly passing the previous save's file
+      // handle as `startIn` is the more direct way to say "open in the
+      // same folder as last time" -- it doesn't depend on the browser's
+      // own bookkeeping, just whatever handle we already have in memory.
+      if(state.cols[col].lastSaveHandle) opts.startIn = state.cols[col].lastSaveHandle;
+      const handle = await window.showSaveFilePicker(opts);
+      const writable = await handle.createWritable();
+      await writable.write(text);
+      await writable.close();
+      state.cols[col].lastSaveHandle = handle; // remember so the next Save defaults to this same folder
+      setStatus(`Saved ${colLabel(col)}: ${handle.name}`);
+    }catch(err){
+      if(err && err.name === 'AbortError') return; // user cancelled the save dialog
+      // Some environments reject showSaveFilePicker (e.g. permissions
+      // policy); fall back to the classic download below.
+      downloadFileClassic(text, suggestedName, col);
+    }
+    return;
+  }
+  downloadFileClassic(text, suggestedName, col);
+}
+
+function downloadFileClassic(text, suggestedName, col){
   const blob = new Blob([text], {type:'text/plain'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = filename.split(/[\\/]/).pop(); // use only filename part for download
+  a.href = url; a.download = suggestedName;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  setStatus(`Saved ${colLabel(col)}: ${filename}`);
+  setStatus(`Saved ${colLabel(col)}: ${suggestedName}`);
 }
 
 async function refreshFile(col){
