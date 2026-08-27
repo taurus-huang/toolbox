@@ -356,6 +356,27 @@
      a drag that happens to pass over the connector strip shouldn't ever
      "land" on a merge button. */
   #editor-wrap.is-selecting .connector-actions .actbtn{pointer-events:none;}
+  /* Pane-resize handle: a full-height grab strip centered in the middle of
+     the connector, clear of the merge buttons docked at its left/right
+     edges (see .connector-actions), letting the user drag the divider
+     between the two adjacent panes left/right. Only the short pill
+     (::before) is drawn by default so it doesn't read as a heavy divider;
+     the full-height 7px box around it is just a more forgiving hit target,
+     a common pattern for thin drag handles. */
+  .connector-handle{
+    position:absolute;top:0;bottom:0;left:50%;width:7px;margin-left:-3.5px;
+    cursor:col-resize;z-index:2;
+  }
+  .connector-handle::before{
+    content:"";position:absolute;top:50%;left:50%;width:3px;height:28px;
+    transform:translate(-50%,-50%);border-radius:2px;background:var(--border);
+  }
+  .connector-handle:hover::before,.connector-handle.dragging::before{background:var(--accent);}
+  /* Applied to <body> for the duration of a drag so the col-resize cursor
+     (and disabled text selection) hold steady even when the pointer
+     briefly moves off the handle itself mid-drag. */
+  body.resizing-panes{cursor:col-resize;user-select:none;}
+  body.resizing-panes .connector-handle{cursor:col-resize;}
   .connector-fill{stroke:none;}
   .connector-fill.add{fill:var(--diff-add-line);}
   .connector-fill.del{fill:var(--diff-del-line);}
@@ -528,12 +549,12 @@
     <div class="pane-scroll" id="scroll-left"><div id="lines-left"></div></div>
     <div class="pane-empty-hint" id="empty-left">Drag and drop a file here</div>
   </div>
-  <div class="connector" id="connector-lm"><svg class="connector-svg" id="connector-lm-svg"></svg><div class="connector-actions" id="connector-lm-actions"></div></div>
+  <div class="connector" id="connector-lm"><svg class="connector-svg" id="connector-lm-svg"></svg><div class="connector-actions" id="connector-lm-actions"></div><div class="connector-handle" id="connector-lm-handle" title="Drag to resize"></div></div>
   <div class="pane" id="pane-mid">
     <div class="pane-scroll" id="scroll-mid"><div id="lines-mid"></div></div>
     <div class="pane-empty-hint" id="empty-mid">Drag and drop a file here</div>
   </div>
-  <div class="connector" id="connector-mr"><svg class="connector-svg" id="connector-mr-svg"></svg><div class="connector-actions" id="connector-mr-actions"></div></div>
+  <div class="connector" id="connector-mr"><svg class="connector-svg" id="connector-mr-svg"></svg><div class="connector-actions" id="connector-mr-actions"></div><div class="connector-handle" id="connector-mr-handle" title="Drag to resize"></div></div>
   <div class="pane" id="pane-right">
     <div class="pane-scroll" id="scroll-right"><div id="lines-right"></div></div>
     <div class="pane-empty-hint" id="empty-right">Drag and drop a file here</div>
@@ -1569,6 +1590,86 @@ function renderGutters(){
   syncPathRowWidths();
 }
 
+/* Lets the user drag a connector's handle to resize the two panes on
+   either side of it. Reassigns flex-grow (as a plain pixel-derived ratio,
+   not a fixed width) so the split stays proportional on window resize,
+   the same way the default flex:1 split already behaves. Which pane sits
+   on the *other* side of connector-lm depends on the current mode (mid in
+   3-way, right in 2-way), so that's resolved fresh at drag-start rather
+   than hard-coded, in case the mode is switched between drags. */
+function setupConnectorResizeHandles(){
+  setupOneResizeHandle('connector-lm-handle', 'pane-left', () => state.mode==='3way' ? 'pane-mid' : 'pane-right');
+  setupOneResizeHandle('connector-mr-handle', 'pane-mid', () => 'pane-right');
+}
+
+/* Puts every currently-visible pane's flex-grow on the same pixel-weighted
+   scale as its own current rendered width (so nothing moves yet -- equal
+   weights in, equal ratio out), before a drag changes just two of them.
+   Needed because a drag only ever touches the two panes next to the
+   handle being dragged; a third, untouched pane left at the CSS default
+   flex:1 (grow=1) would suddenly be on a wildly different scale from the
+   few-hundred-pixel weights just assigned to the other two -- which is
+   what made it collapse and the divider appear to jump right after a
+   2-way/3-way switch (resetPaneWidths puts every pane back at that same
+   default flex:1, so the very first drag afterward hit exactly this). */
+function freezeAllPaneWidths(){
+  const ids = state.mode==='3way' ? ['pane-left','pane-mid','pane-right'] : ['pane-left','pane-right'];
+  const els = ids.map(id => document.getElementById(id)).filter(Boolean);
+  // Measure every pane's width up front, before changing any of their
+  // styles -- writing a new flex-grow to one pane while the others still
+  // sit at the old default (flex-grow:1) actually shifts the layout
+  // immediately, which would corrupt the width read for whichever pane
+  // is measured next in the same pass.
+  const widths = els.map(el => el.getBoundingClientRect().width);
+  els.forEach((el, i) => { el.style.flex = widths[i].toFixed(2) + ' 1 0%'; });
+}
+
+function setupOneResizeHandle(handleId, paneAId, getPaneBId){
+  const handle = document.getElementById(handleId);
+  if(!handle) return;
+  const MIN_PANE_W = 80; // px, keep either side from collapsing to nothing
+
+  handle.addEventListener('mousedown', (e)=>{
+    if(e.button !== 0) return;
+    const paneA = document.getElementById(paneAId);
+    const paneB = document.getElementById(getPaneBId());
+    if(!paneA || !paneB) return;
+    e.preventDefault();
+
+    freezeAllPaneWidths();
+
+    const startX = e.clientX;
+    const startWA = paneA.getBoundingClientRect().width;
+    const startWB = paneB.getBoundingClientRect().width;
+    const total = startWA + startWB;
+
+    handle.classList.add('dragging');
+    document.body.classList.add('resizing-panes');
+
+    function onMove(ev){
+      const dx = ev.clientX - startX;
+      const newWA = Math.min(Math.max(startWA + dx, MIN_PANE_W), total - MIN_PANE_W);
+      const newWB = total - newWA;
+      // Plain numbers as flex-grow: two panes weighted e.g. 300/200 split
+      // available space 3:2, same math as the default flex:1 (1:1) split
+      // -- just swapped for the dragged ratio instead of always-equal.
+      paneA.style.flex = newWA + ' 1 0%';
+      paneB.style.flex = newWB + ' 1 0%';
+      // Connector position shifts with the panes; keep the path row's
+      // swap-cell tracking it live instead of only after mouseup.
+      syncPathRowWidths();
+    }
+    function onUp(){
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      handle.classList.remove('dragging');
+      document.body.classList.remove('resizing-panes');
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
 /* The CSS flex-basis on the path row's col-labels (see the comment above
    that rule) gets the swap-cells lined up with their connectors correctly
    in principle, but the path row and the editor row are two separate
@@ -1579,7 +1680,10 @@ function renderGutters(){
    first. Rather than chase that with more CSS math, measure the actual
    rendered connector positions after layout and set each col-label's
    width to match exactly -- this stays pixel-exact regardless of
-   rounding, window width, or a future connector-width change. */
+   rounding, window width, or a future connector-width change. Also
+   re-run live while a connector-handle drag is in progress (see
+   setupOneResizeHandle) so the swap-cell tracks the connector in real
+   time instead of only snapping into place after mouseup. */
 function syncPathRowWidths(){
   const pathrow = document.querySelector('.pathrow');
   const leftLabel = document.getElementById('pathcol-left');
@@ -2292,6 +2396,22 @@ function setActiveModeButtons(mode){
   document.getElementById('btn-3way').classList.toggle('active', mode==='3way');
 }
 
+/* Clears any manual pane-width split from dragging a connector handle
+   (see setupOneResizeHandle), falling back to the CSS default (flex:1 on
+   each pane, i.e. an equal split). A left/mid/right ratio the user set up
+   for one mode isn't a meaningful starting point for the other -- 2-way
+   only has two panes to begin with, and 3-way reintroduces a pane that
+   had no width of its own yet -- so every 2-way/3-way switch starts the
+   split fresh instead of carrying it over. */
+function resetPaneWidths(){
+  const leftEl = document.getElementById('pane-left');
+  const midEl = document.getElementById('pane-mid');
+  const rightEl = document.getElementById('pane-right');
+  if(leftEl) leftEl.style.flex = '';
+  if(midEl) midEl.style.flex = '';
+  if(rightEl) rightEl.style.flex = '';
+}
+
 async function loadDroppedFile(col, dt){
   const entries = await getAllDroppedFiles(dt);
   if(!entries.length){ setStatus(`${colLabel(col)}: no file detected in the drop`); return; }
@@ -2303,6 +2423,7 @@ async function loadDroppedFile(col, dt){
     const useCols = wantMode==='3way' ? ['left','mid','right'] : ['left','right'];
     state.mode = wantMode;
     setActiveModeButtons(wantMode);
+    resetPaneWidths();
     try{
       for(let i=0;i<useCols.length;i++){
         await loadFileIntoColumn(useCols[i], entries[i].file, entries[i].handle);
@@ -2440,6 +2561,7 @@ function setupScrollSync(){
 
 document.getElementById('btn-2way').addEventListener('click', ()=>{
   state.mode='2way';
+  resetPaneWidths();
   document.getElementById('btn-2way').classList.add('active');
   document.getElementById('btn-3way').classList.remove('active');
   recompute();
@@ -2450,6 +2572,7 @@ document.getElementById('btn-3way').addEventListener('click', ()=>{
   // Keep left and right exactly as they are.
   // Mid stays as-is (empty or previously loaded). Do NOT move right->mid.
   state.mode='3way';
+  resetPaneWidths();
   document.getElementById('btn-3way').classList.add('active');
   document.getElementById('btn-2way').classList.remove('active');
   recompute();
@@ -3180,6 +3303,7 @@ syncPathInput('right');
 setupScrollSync();
 setupGutterClicks();
 setupAllDropZones();
+setupConnectorResizeHandles();
 recompute();
 setStatus('Ready');
 
