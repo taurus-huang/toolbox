@@ -1391,34 +1391,36 @@ canvas.addEventListener("mousedown", (e) => {
     const h = hitHandle(sel, p);
     if (h) { startTransform(sel, h, p); return; }
   }
-  if (state.tool === "select") {
-    const hit = hitObject(p);
-    const ctrlKey = e.ctrlKey || e.metaKey;
-    if (hit) {
-      if (ctrlKey) {
-        // Ctrl+click toggles this object in/out of the multi-selection.
-        toggleSelection(hit.id);
-      } else if (!state.selectedIds.includes(hit.id)) {
-        // Plain click on an object outside the current selection resets to just that object.
-        selectOnly(hit.id);
-      }
-      // Otherwise: clicking (without Ctrl) on an object already part of the current
-      // selection keeps the whole selection intact, so it can be dragged as a group.
-      buildProps();
-      render();
-      if (state.selectedIds.includes(hit.id)) {
-        action = { mode: "move", objs: getSelectedObjects().map((o) => ({ o, orig: JSON.parse(JSON.stringify(o)) })), start: p };
-      }
-    } else {
-      if (!ctrlKey) { selectOnly(null); buildProps(); render(); }
-      // Empty area with the select tool: drag a rubber-band marquee to box-select
-      // multiple objects at once (Ctrl+drag adds to the existing selection).
-      // Right-click-drag pans the canvas view instead.
-      action = { mode: "marquee", start: p, current: p, additive: ctrlKey };
-      render();
+  const hit = hitObject(p);
+  const ctrlKey = e.ctrlKey || e.metaKey;
+  if (hit) {
+    // Clicking an existing object always selects (and lets you drag) it,
+    // even while a drawing tool is active — so you don't have to switch back
+    // to Select just to grab something that's already on the canvas.
+    if (ctrlKey) {
+      // Ctrl+click toggles this object in/out of the multi-selection.
+      toggleSelection(hit.id);
+    } else if (!state.selectedIds.includes(hit.id)) {
+      // Plain click on an object outside the current selection resets to just that object.
+      selectOnly(hit.id);
     }
+    // Otherwise: clicking (without Ctrl) on an object already part of the current
+    // selection keeps the whole selection intact, so it can be dragged as a group.
+    buildProps();
+    render();
+    if (state.selectedIds.includes(hit.id)) {
+      action = { mode: "move", objs: getSelectedObjects().map((o) => ({ o, orig: JSON.parse(JSON.stringify(o)) })), start: p };
+    }
+  } else if (state.tool === "select") {
+    if (!ctrlKey) { selectOnly(null); buildProps(); render(); }
+    // Empty area with the select tool: drag a rubber-band marquee to box-select
+    // multiple objects at once (Ctrl+drag adds to the existing selection).
+    // Right-click-drag pans the canvas view instead.
+    action = { mode: "marquee", start: p, current: p, additive: ctrlKey };
+    render();
   } else {
-    // create
+    // create — only reached on empty canvas area, since a click on an
+    // existing object is handled by the selection branch above.
     const o = createObject(state.tool, p);
     state.objects.push(o);
     selectOnly(o.id);
@@ -1572,8 +1574,8 @@ function updateCursor(e) {
   const p = toWorld(e);
   const sel = state.selectedIds.length === 1 ? state.objects.find((o) => o.id === state.selectedId) : null;
   if (sel && hitHandle(sel, p)) { canvas.style.cursor = "pointer"; return; }
-  if (state.tool !== "select") { canvas.style.cursor = "crosshair"; return; }
-  canvas.style.cursor = hitObject(p) ? "move" : "crosshair";
+  if (hitObject(p)) { canvas.style.cursor = "move"; return; }
+  canvas.style.cursor = "crosshair";
 }
 
 // ---------- Properties panel ----------
@@ -2281,18 +2283,86 @@ function transformImage(kind) {
 }
 
 // ---------- Export ----------
-function exportPNG() {
+// Remembers the last location the user saved to (via the File System Access
+// API's showSaveFilePicker) so the save dialog re-opens there next time.
+// IndexedDB is used because the remembered value is a live FileSystemHandle
+// object, which plain storage (localStorage/cookies) can't hold.
+const SAVE_LOCATION_DB = "annotator-save-location";
+const SAVE_LOCATION_STORE = "handles";
+const SAVE_LOCATION_KEY = "lastSaveFileHandle";
+
+function openSaveLocationDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(SAVE_LOCATION_DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(SAVE_LOCATION_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function getLastSaveFileHandle() {
+  try {
+    const db = await openSaveLocationDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(SAVE_LOCATION_STORE, "readonly");
+      const req = tx.objectStore(SAVE_LOCATION_STORE).get(SAVE_LOCATION_KEY);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (err) { return null; }
+}
+async function setLastSaveFileHandle(handle) {
+  try {
+    const db = await openSaveLocationDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(SAVE_LOCATION_STORE, "readwrite");
+      tx.objectStore(SAVE_LOCATION_STORE).put(handle, SAVE_LOCATION_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) { /* remembering the folder is a nice-to-have, not critical */ }
+}
+
+async function exportPNG() {
   if (!baseCanvas) return;
   // Flatten at native resolution, independent of the current on-screen zoom level.
   const savedW = canvas.width, savedH = canvas.height;
   canvas.width = worldW; canvas.height = worldH;
   render(true);
-  const url = canvas.toDataURL("image/png");
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
   canvas.width = savedW; canvas.height = savedH;
   render();
+  const filename = "annotated-" + Date.now() + ".png";
+
+  if (window.showSaveFilePicker) {
+    // Native "Save As" dialog: lets the user pick any folder, and defaults to
+    // wherever they saved to last time.
+    const pickerOpts = {
+      suggestedName: filename,
+      types: [{ description: "PNG Image", accept: { "image/png": [".png"] } }],
+    };
+    const lastHandle = await getLastSaveFileHandle();
+    if (lastHandle) pickerOpts.startIn = lastHandle;
+    try {
+      const fileHandle = await window.showSaveFilePicker(pickerOpts);
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      await setLastSaveFileHandle(fileHandle); // remember this folder for next time
+      return;
+    } catch (err) {
+      if (err && err.name === "AbortError") return; // user cancelled the dialog
+      // Any other failure (e.g. a stale startIn handle) falls through to the
+      // plain-download fallback below so Save still works.
+    }
+  }
+  // Fallback for browsers without File System Access API support (e.g.
+  // Firefox, Safari): behaves like before, downloading straight to the
+  // browser's default download folder.
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = "annotated-" + Date.now() + ".png";
+  a.href = url; a.download = filename;
   a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // ---------- Clipboard: selected object(s) copy / paste ----------
