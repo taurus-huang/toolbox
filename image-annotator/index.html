@@ -707,6 +707,7 @@
 const state = {
   objects: [],
   selectedId: null,
+  selectedIds: [], // full selection set for multi-select (Ctrl+click); mirrors selectedId when length <= 1
   tool: "select",
   nextNumber: 1,
   defaults: {
@@ -752,6 +753,33 @@ const isBox = (t) => ["rect", "roundRect", "ellipse", "triangle", "highlighter",
 const isSeg = (t) => ["line", "arrow"].includes(typeof t === "string" ? t : t && t.type);
 function boxCenter(o) { return { x: o.x + o.w / 2, y: o.y + o.h / 2 }; }
 
+// ---------- Multi-select helpers ----------
+// state.selectedIds is the source of truth for "what is selected" (0, 1, or many objects).
+// state.selectedId mirrors it when exactly one object is selected (null otherwise), and is
+// what all the pre-existing single-object code (handles, properties panel, nudge, etc.) reads.
+function setSelection(ids) {
+  const uniq = [];
+  for (const id of ids) if (id && !uniq.includes(id)) uniq.push(id);
+  state.selectedIds = uniq;
+  state.selectedId = uniq.length === 1 ? uniq[0] : null;
+}
+function selectOnly(id) { setSelection(id ? [id] : []); }
+function toggleSelection(id) {
+  const idx = state.selectedIds.indexOf(id);
+  if (idx >= 0) { const next = state.selectedIds.slice(); next.splice(idx, 1); setSelection(next); }
+  else { setSelection([...state.selectedIds, id]); }
+}
+function getSelectedObjects() {
+  return state.objects.filter((o) => state.selectedIds.includes(o.id));
+}
+function deleteSelected() {
+  if (!state.selectedIds.length) return;
+  const ids = new Set(state.selectedIds);
+  state.objects = state.objects.filter((o) => !ids.has(o.id));
+  setSelection([]);
+  pushHistory(); render(); buildProps();
+}
+
 function pushHistory() {
   history = history.slice(0, historyIndex + 1);
   history.push(JSON.stringify({
@@ -770,7 +798,7 @@ function restore(snap) {
   const d = JSON.parse(snap);
   state.objects = d.objects;
   state.nextNumber = d.nextNumber;
-  if (!state.objects.find((o) => o.id === state.selectedId)) state.selectedId = null;
+  setSelection((state.selectedIds || []).filter((id) => state.objects.some((o) => o.id === id)));
   if (d.canvasSrc) {
     const img = new Image();
     img.onload = () => {
@@ -810,7 +838,7 @@ function initBlankCanvas() {
   fitCanvasToStage();
   canvasWrap.style.display = "block";
   state.objects = [];
-  state.selectedId = null;
+  selectOnly(null);
   state.nextNumber = 1;
   history = []; historyIndex = -1;
   pushHistory();
@@ -832,7 +860,7 @@ function loadImageFromSrc(src) {
     canvas.classList.remove("empty");
     canvasWrap.style.display = "block";
     state.objects = [];
-    state.selectedId = null;
+    selectOnly(null);
     state.nextNumber = 1;
     history = []; historyIndex = -1;
     pushHistory();
@@ -956,9 +984,17 @@ function render(forExport = false) {
   ctx.setTransform(bs, 0, 0, bs, 0, 0);
   ctx.drawImage(baseCanvas, 0, 0);
   for (const o of state.objects) drawObject(o);
-  if (!forExport && state.selectedId) {
-    const o = state.objects.find((x) => x.id === state.selectedId);
-    if (o) drawSelection(o);
+  if (!forExport) {
+    if (state.selectedIds.length > 1) {
+      // Multi-select: show a plain outline per object, no resize/rotate handles.
+      for (const id of state.selectedIds) {
+        const o = state.objects.find((x) => x.id === id);
+        if (o) drawMultiOutline(o);
+      }
+    } else if (state.selectedId) {
+      const o = state.objects.find((x) => x.id === state.selectedId);
+      if (o) drawSelection(o);
+    }
   }
 }
 
@@ -1190,6 +1226,32 @@ function drawSelection(o) {
 }
 const HANDLE_DIRS = [[-1,-1],[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,1],[-1,0]];
 
+// Simplified selection indicator used when multiple objects are selected at once:
+// just an outline (no resize/rotate handles, since transforms only apply per-object).
+function drawMultiOutline(o) {
+  ctx.save();
+  const s = currentScale();
+  ctx.lineWidth = 1.5 * s;
+  ctx.strokeStyle = "#3b82f6";
+  ctx.fillStyle = "#3b82f6";
+  const hs = handleSize();
+  if (isBox(o)) {
+    const c = boxCenter(o);
+    ctx.translate(c.x, c.y);
+    ctx.rotate(deg2rad(o.rotation || 0));
+    ctx.strokeRect(-o.w / 2, -o.h / 2, o.w, o.h);
+  } else if (isSeg(o)) {
+    ctx.beginPath();
+    ctx.moveTo(o.x1, o.y1);
+    ctx.lineTo(o.x2, o.y2);
+    ctx.stroke();
+    for (const [px, py] of [[o.x1, o.y1], [o.x2, o.y2]]) {
+      ctx.beginPath(); ctx.arc(px, py, hs / 2.2, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
 // ---------- Coordinate conversion ----------
 function toWorld(e) {
   const rect = canvas.getBoundingClientRect();
@@ -1275,19 +1337,31 @@ canvas.addEventListener("mousedown", (e) => {
   if (!baseCanvas) return; // safety guard; a blank canvas is created on load
   const p = toWorld(e);
   if (state.tool === "select") {
-    const sel = state.objects.find((o) => o.id === state.selectedId);
+    // Resize/rotate handles only appear (and only apply) for a single selected object.
+    const sel = state.selectedIds.length === 1 ? state.objects.find((o) => o.id === state.selectedId) : null;
     if (sel) {
       const h = hitHandle(sel, p);
       if (h) { startTransform(sel, h, p); return; }
     }
     const hit = hitObject(p);
+    const ctrlKey = e.ctrlKey || e.metaKey;
     if (hit) {
-      state.selectedId = hit.id;
+      if (ctrlKey) {
+        // Ctrl+click toggles this object in/out of the multi-selection.
+        toggleSelection(hit.id);
+      } else if (!state.selectedIds.includes(hit.id)) {
+        // Plain click on an object outside the current selection resets to just that object.
+        selectOnly(hit.id);
+      }
+      // Otherwise: clicking (without Ctrl) on an object already part of the current
+      // selection keeps the whole selection intact, so it can be dragged as a group.
       buildProps();
-      action = { mode: "move", o: hit, start: p, orig: JSON.parse(JSON.stringify(hit)) };
       render();
+      if (state.selectedIds.includes(hit.id)) {
+        action = { mode: "move", objs: getSelectedObjects().map((o) => ({ o, orig: JSON.parse(JSON.stringify(o)) })), start: p };
+      }
     } else {
-      state.selectedId = null; buildProps(); render();
+      if (!ctrlKey) { selectOnly(null); buildProps(); render(); }
       // Empty area with the select tool: pan the view by dragging, like the
       // Acrobat "hand" tool. Only kicks in when there's no object under the
       // cursor, so clicking/dragging objects still selects/moves them.
@@ -1299,7 +1373,7 @@ canvas.addEventListener("mousedown", (e) => {
     // create
     const o = createObject(state.tool, p);
     state.objects.push(o);
-    state.selectedId = o.id;
+    selectOnly(o.id);
     if (state.tool === "text" || state.tool === "number") {
       state.tool = "select"; updateToolUI();
       pushHistory(); render(); buildProps();
@@ -1324,8 +1398,22 @@ window.addEventListener("mousemove", (e) => {
   }
   if (!action) { updateCursor(e); return; }
   const p = toWorld(e);
-  const o = action.o, orig = action.orig;
   const dx = p.x - action.start.x, dy = p.y - action.start.y;
+
+  if (action.mode === "move") {
+    // Move every selected object together (works for a single selection too, since
+    // action.objs always holds the full current selection).
+    for (const item of action.objs) {
+      const o = item.o, orig = item.orig;
+      if (isBox(o.type)) { o.x = orig.x + dx; o.y = orig.y + dy; }
+      else { o.x1 = orig.x1 + dx; o.y1 = orig.y1 + dy; o.x2 = orig.x2 + dx; o.y2 = orig.y2 + dy; }
+    }
+    render();
+    buildProps();
+    return;
+  }
+
+  const o = action.o, orig = action.orig;
 
   if (action.mode === "create") {
     if (isSeg(o.type)) {
@@ -1337,9 +1425,6 @@ window.addEventListener("mousemove", (e) => {
       o.x = Math.min(orig.x, orig.x + w); o.y = Math.min(orig.y, orig.y + h);
       o.w = Math.abs(w); o.h = Math.abs(h);
     }
-  } else if (action.mode === "move") {
-    if (isBox(o.type)) { o.x = orig.x + dx; o.y = orig.y + dy; }
-    else { o.x1 = orig.x1 + dx; o.y1 = orig.y1 + dy; o.x2 = orig.x2 + dx; o.y2 = orig.y2 + dy; }
   } else if (action.mode === "endpoint") {
     if (action.handle.which === 1) { o.x1 = p.x; o.y1 = p.y; } else { o.x2 = p.x; o.y2 = p.y; }
   } else if (action.mode === "rotate") {
@@ -1400,7 +1485,7 @@ window.addEventListener("mouseup", () => {
   const o = action.o;
   if (action.mode === "create") {
     if (isSeg(o.type)) {
-      if (Math.hypot(o.x2 - o.x1, o.y2 - o.y1) < 5) { state.objects.pop(); state.selectedId = null; }
+      if (Math.hypot(o.x2 - o.x1, o.y2 - o.y1) < 5) { state.objects.pop(); selectOnly(null); }
     } else if (o.w < 5 && o.h < 5) {
       // click without drag -> default size
       o.w = o.type === "number" ? 44 : 120; o.h = o.type === "number" ? 44 : 80;
@@ -1427,6 +1512,15 @@ const propsContent = document.getElementById("propsContent");
 const typeNames = { rect: "Rectangle", roundRect: "Rounded Rectangle", ellipse: "Ellipse", triangle: "Triangle", line: "Line", arrow: "Arrow", highlighter: "Highlighter", text: "Text", number: "Numbered Marker", image: "Image" };
 
 function buildProps() {
+  if (state.selectedIds.length > 1) {
+    // Multiple objects selected: properties editing is not shown for now.
+    propsEmpty.style.display = "block";
+    propsContent.style.display = "none";
+    propsEmpty.innerHTML = `${state.selectedIds.length} objects selected.<br />Properties aren't shown while multiple objects are selected.`;
+    buildObjectList();
+    return;
+  }
+  propsEmpty.innerHTML = `No object selected.<br />Use the tools on the left to add annotations, or click an object on the canvas to edit its properties.`;
   const o = state.objects.find((x) => x.id === state.selectedId);
   if (!o) { propsEmpty.style.display = "block"; propsContent.style.display = "none"; buildObjectList(); return; }
   propsEmpty.style.display = "none"; propsContent.style.display = "block";
@@ -1521,7 +1615,7 @@ function buildObjectList() {
   // Show topmost (last in array = front) first for intuitive layer order.
   for (let i = n - 1; i >= 0; i--) {
     const o = state.objects[i];
-    const sel = o.id === state.selectedId;
+    const sel = state.selectedIds.includes(o.id);
     html += `<div class="obj-item${sel ? " selected" : ""}" data-id="${o.id}" draggable="true">
       <span class="obj-grip" title="Drag to reorder">${iconSvgs.grip}</span>
       <span class="obj-label">${escapeHtml(objLabel(o, i + 1))}</span>
@@ -1539,7 +1633,8 @@ function buildObjectList() {
   objListEl.querySelectorAll(".obj-item").forEach((item) => {
     item.addEventListener("click", (e) => {
       if (e.target.closest("[data-act]")) return;
-      state.selectedId = item.dataset.id;
+      if (e.ctrlKey || e.metaKey) toggleSelection(item.dataset.id);
+      else selectOnly(item.dataset.id);
       render(); buildProps();
     });
   });
@@ -2062,9 +2157,9 @@ function layerAction(o, act) {
     const copy = JSON.parse(JSON.stringify(o)); copy.id = uid();
     if (isBox(o)) { copy.x += 20; copy.y += 20; } else { copy.x1+=20;copy.y1+=20;copy.x2+=20;copy.y2+=20; }
     if (o.type === "number") copy.number = state.nextNumber++;
-    state.objects.push(copy); state.selectedId = copy.id;
+    state.objects.push(copy); selectOnly(copy.id);
   }
-  else if (act === "delete") { state.objects.splice(idx,1); if (state.selectedId === o.id) state.selectedId = null; }
+  else if (act === "delete") { state.objects.splice(idx,1); if (state.selectedIds.includes(o.id)) setSelection(state.selectedIds.filter((id) => id !== o.id)); }
   pushHistory(); render(); buildProps();
 }
 
@@ -2130,20 +2225,20 @@ function exportPNG() {
   a.click();
 }
 
-// ---------- Clipboard: selected object copy / paste ----------
-// When an object is selected, Ctrl+C copies that object (not the whole
-// canvas) to the clipboard, and Ctrl+V pastes it back as a new object.
+// ---------- Clipboard: selected object(s) copy / paste ----------
+// When one or more objects are selected, Ctrl+C copies them (not the whole
+// canvas) to the clipboard, and Ctrl+V pastes them back as new objects.
 // An in-memory fallback is kept in case the system clipboard read/write
 // is unavailable or blocked by the browser.
 const APP_CLIPBOARD_MARKER = "__appClipboardObject__";
-let appClipboardObject = null;
+let appClipboardObjects = null; // array of copied objects (single or multiple)
 
-async function copySelectedObjectToClipboard() {
-  const o = state.objects.find((x) => x.id === state.selectedId);
-  if (!o) return;
-  appClipboardObject = JSON.parse(JSON.stringify(o));
+async function copySelectedObjectsToClipboard() {
+  const objs = getSelectedObjects();
+  if (!objs.length) return;
+  appClipboardObjects = objs.map((o) => JSON.parse(JSON.stringify(o)));
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    const payload = JSON.stringify({ marker: APP_CLIPBOARD_MARKER, object: appClipboardObject });
+    const payload = JSON.stringify({ marker: APP_CLIPBOARD_MARKER, objects: appClipboardObjects });
     try {
       await navigator.clipboard.writeText(payload);
     } catch (err) {
@@ -2153,13 +2248,17 @@ async function copySelectedObjectToClipboard() {
 }
 
 function pasteObjectData(data) {
-  if (!data || data.marker !== APP_CLIPBOARD_MARKER || !data.object) return false;
-  const copy = JSON.parse(JSON.stringify(data.object));
-  copy.id = uid();
-  if (isBox(copy)) { copy.x += 20; copy.y += 20; } else { copy.x1 += 20; copy.y1 += 20; copy.x2 += 20; copy.y2 += 20; }
-  if (copy.type === "number") copy.number = state.nextNumber++;
-  state.objects.push(copy);
-  state.selectedId = copy.id;
+  if (!data || data.marker !== APP_CLIPBOARD_MARKER || !Array.isArray(data.objects) || !data.objects.length) return false;
+  const newIds = [];
+  for (const src of data.objects) {
+    const copy = JSON.parse(JSON.stringify(src));
+    copy.id = uid();
+    if (isBox(copy)) { copy.x += 20; copy.y += 20; } else { copy.x1 += 20; copy.y1 += 20; copy.x2 += 20; copy.y2 += 20; }
+    if (copy.type === "number") copy.number = state.nextNumber++;
+    state.objects.push(copy);
+    newIds.push(copy.id);
+  }
+  setSelection(newIds);
   pushHistory(); render(); buildProps();
   return true;
 }
@@ -2231,7 +2330,7 @@ function addImageAsObject(src) {
     imageObjCache.set(src, img); // already loaded, so it renders immediately
     const obj = { id: uid(), type: "image", rotation: 0, x, y, w, h, src, stroke: state.defaults.stroke, strokeWidth: 0, fill: state.defaults.fill, filled: false, opacity: state.defaults.opacity };
     state.objects.push(obj);
-    state.selectedId = obj.id;
+    selectOnly(obj.id);
     pushHistory();
     render();
     buildProps();
@@ -2329,8 +2428,8 @@ window.addEventListener("paste", (e) => {
   }
   // Fallback: the system clipboard didn't have our object JSON (e.g. the
   // browser blocked navigator.clipboard.writeText) — use the in-memory
-  // copy captured by copySelectedObjectToClipboard(), if any.
-  if (appClipboardObject && pasteObjectData({ marker: APP_CLIPBOARD_MARKER, object: appClipboardObject })) {
+  // copy captured by copySelectedObjectsToClipboard(), if any.
+  if (appClipboardObjects && appClipboardObjects.length && pasteObjectData({ marker: APP_CLIPBOARD_MARKER, objects: appClipboardObjects })) {
     e.preventDefault();
   }
 });
@@ -2343,30 +2442,30 @@ window.addEventListener("keydown", (e) => {
   if (typing) return;
   if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="c") {
     e.preventDefault();
-    if (state.selectedId) copySelectedObjectToClipboard(); else copyImageToClipboard();
+    if (state.selectedIds.length) copySelectedObjectsToClipboard(); else copyImageToClipboard();
     return;
   }
   // Note: Ctrl+V is intentionally NOT intercepted here — it's handled by the
   // native "paste" event listener below, which reads clipboardData directly
   // and does not trigger the browser's clipboard-read permission prompt.
-  // That listener first tries to paste a copied object (see
-  // copySelectedObjectToClipboard/pasteObjectData above), falling back to
+  // That listener first tries to paste copied object(s) (see
+  // copySelectedObjectsToClipboard/pasteObjectData above), falling back to
   // pasting an image from the clipboard, same as before.
-  if ((e.key==="Delete"||e.key==="Backspace") && state.selectedId) {
+  if ((e.key==="Delete"||e.key==="Backspace") && state.selectedIds.length) {
     e.preventDefault();
-    const o = state.objects.find(x=>x.id===state.selectedId);
-    if (o) layerAction(o, "delete");
+    deleteSelected();
   }
   const map = { v:"select", r:"rect", o:"ellipse", l:"line", a:"arrow", h:"highlighter", t:"text", n:"number" };
   if (map[e.key.toLowerCase()]) { state.tool = map[e.key.toLowerCase()]; updateToolUI(); canvas.style.cursor = state.tool==="select"?"grab":"crosshair"; }
-  // arrow-key nudge
-  if (state.selectedId && ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
+  // arrow-key nudge (moves every selected object together)
+  if (state.selectedIds.length && ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
     e.preventDefault();
-    const o = state.objects.find(x=>x.id===state.selectedId); if (!o) return;
     const step = e.shiftKey?10:1;
     const dx = (e.key==="ArrowLeft"?-step:e.key==="ArrowRight"?step:0);
     const dy = (e.key==="ArrowUp"?-step:e.key==="ArrowDown"?step:0);
-    if (isBox(o)) { o.x+=dx; o.y+=dy; } else { o.x1+=dx;o.y1+=dy;o.x2+=dx;o.y2+=dy; }
+    for (const o of getSelectedObjects()) {
+      if (isBox(o)) { o.x+=dx; o.y+=dy; } else { o.x1+=dx;o.y1+=dy;o.x2+=dx;o.y2+=dy; }
+    }
     render(); buildProps(); pushHistoryDebounced();
   }
 });
