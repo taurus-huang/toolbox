@@ -1060,12 +1060,19 @@ function drawObject(o) {
     ctx.fillStyle = o.stroke;
     ctx.lineCap = "round";
     ctx.setLineDash(lineDashArray(o.lineStyle, o.strokeWidth));
+    const ang = Math.atan2(o.y2 - o.y1, o.x2 - o.x1);
+    // Stop the shaft short of an arrowhead's tip so its round cap and full
+    // width don't poke out past the (narrower, tapering-to-a-point) triangle.
+    const len = Math.hypot(o.x2 - o.x1, o.y2 - o.y1);
+    const t0 = len > 0 ? Math.min(capInset(o.startCap, o.strokeWidth) / len, 0.5) : 0;
+    const t1 = len > 0 ? Math.min(capInset(o.endCap, o.strokeWidth) / len, 0.5) : 0;
+    const sx = o.x1 + (o.x2 - o.x1) * t0, sy = o.y1 + (o.y2 - o.y1) * t0;
+    const ex = o.x2 - (o.x2 - o.x1) * t1, ey = o.y2 - (o.y2 - o.y1) * t1;
     ctx.beginPath();
-    ctx.moveTo(o.x1, o.y1);
-    ctx.lineTo(o.x2, o.y2);
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
     ctx.stroke();
     ctx.setLineDash([]);
-    const ang = Math.atan2(o.y2 - o.y1, o.x2 - o.x1);
     drawLineCap(o.x1, o.y1, ang + Math.PI, o.startCap, o.strokeWidth);
     drawLineCap(o.x2, o.y2, ang, o.endCap, o.strokeWidth);
   }
@@ -1081,6 +1088,14 @@ function lineDashArray(style, sw) {
     case "longdash": return [w * 6, w * 2.5];
     default: return [];
   }
+}
+// How far back from the endpoint the shaft should stop for a given cap style,
+// so it doesn't stick out past the cap (only the arrowhead needs this — circle
+// and square caps are already drawn wide/large enough to cover the shaft's end).
+function capInset(cap, strokeWidth) {
+  if (cap !== "arrow") return 0;
+  const size = Math.max(12, strokeWidth * 3.2);
+  return size * Math.cos(Math.PI / 6);
 }
 function drawLineCap(x, y, angle, cap, strokeWidth) {
   if (!cap || cap === "none") return;
