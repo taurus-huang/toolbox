@@ -721,6 +721,10 @@ const state = {
     radius: 12,
     opacity: 100,
   },
+  // Last-used style property values per tool (e.g. state.toolPropDefaults.rect.stroke),
+  // captured whenever the user edits a property in the panel. New objects created with
+  // that same tool start out using these instead of the hardcoded defaults above.
+  toolPropDefaults: {},
 };
 
 let baseCanvas = null; // offscreen canvas holding the (transformed) source image
@@ -1343,26 +1347,31 @@ function hitHandle(o, p) {
 // ---------- Object creation ----------
 function createObject(tool, p) {
   const d = state.defaults;
-  const base = { id: uid(), type: tool, rotation: 0, stroke: d.stroke, strokeWidth: d.strokeWidth, fill: d.fill, filled: d.filled, opacity: d.opacity };
+  const r = state.toolPropDefaults[tool] || {};
+  const base = { id: uid(), type: tool, rotation: 0, stroke: r.stroke ?? d.stroke, strokeWidth: r.strokeWidth ?? d.strokeWidth, fill: r.fill ?? d.fill, filled: r.filled ?? d.filled, opacity: r.opacity ?? d.opacity };
   if (tool === "text") {
-    const fontWeight = "600";
-    const size = measureTextBoxSize("Text", d.fontSize, d.fontFamily, fontWeight);
-    return { ...base, x: p.x, y: p.y, w: size.w, h: size.h, text: "Text", fontSize: d.fontSize, fontFamily: d.fontFamily, fontColor: d.fontColor, fontWeight, bg: false, bgColor: "#ffffff" };
+    const fontWeight = r.fontWeight ?? "600";
+    const fontSize = r.fontSize ?? d.fontSize;
+    const fontFamily = r.fontFamily ?? d.fontFamily;
+    const fontColor = r.fontColor ?? d.fontColor;
+    const size = measureTextBoxSize("Text", fontSize, fontFamily, fontWeight);
+    return { ...base, x: p.x, y: p.y, w: size.w, h: size.h, text: "Text", fontSize, fontFamily, fontColor, fontWeight, bg: r.bg ?? false, bgColor: r.bgColor ?? "#ffffff" };
   }
   if (tool === "number") {
     const size = 44;
-    const o = { ...base, x: p.x - size / 2, y: p.y - size / 2, w: size, h: size, number: state.nextNumber++, fontColor: "#ffffff", fontFamily: d.fontFamily, fill: d.stroke, strokeWidth: 0 };
+    const o = { ...base, x: p.x - size / 2, y: p.y - size / 2, w: size, h: size, number: state.nextNumber++, fontColor: r.fontColor ?? "#ffffff", fontFamily: r.fontFamily ?? d.fontFamily, fill: r.fill ?? d.stroke, strokeWidth: r.strokeWidth ?? 0 };
+    if (r.stroke) o.stroke = r.stroke;
     return o;
   }
   if (tool === "highlighter") {
-    return { ...base, x: p.x, y: p.y, w: 0, h: 0, radius: 0, fill: "#ffff00", stroke: "#ffff00", filled: true, strokeWidth: 0 };
+    return { ...base, x: p.x, y: p.y, w: 0, h: 0, radius: r.radius ?? 0, fill: r.fill ?? "#ffff00", stroke: r.stroke ?? "#ffff00", filled: true, strokeWidth: r.strokeWidth ?? 0 };
   }
   if (isSeg(tool)) {
-    return { ...base, x1: p.x, y1: p.y, x2: p.x, y2: p.y, lineStyle: "solid", startCap: "none", endCap: tool === "arrow" ? "arrow" : "none" };
+    return { ...base, x1: p.x, y1: p.y, x2: p.x, y2: p.y, lineStyle: r.lineStyle ?? "solid", startCap: r.startCap ?? "none", endCap: r.endCap ?? (tool === "arrow" ? "arrow" : "none") };
   }
-  if (tool === "roundRect") return { ...base, x: p.x, y: p.y, w: 0, h: 0, radius: d.radius };
-  if (tool === "triangle") return { ...base, x: p.x, y: p.y, w: 0, h: 0, radius: 0 };
-  if (tool === "rect") return { ...base, x: p.x, y: p.y, w: 0, h: 0, radius: 0 };
+  if (tool === "roundRect") return { ...base, x: p.x, y: p.y, w: 0, h: 0, radius: r.radius ?? d.radius };
+  if (tool === "triangle") return { ...base, x: p.x, y: p.y, w: 0, h: 0, radius: r.radius ?? 0 };
+  if (tool === "rect") return { ...base, x: p.x, y: p.y, w: 0, h: 0, radius: r.radius ?? 0 };
   return { ...base, x: p.x, y: p.y, w: 0, h: 0 };
 }
 
@@ -1868,8 +1877,8 @@ function bindProps(o) {
   const st = document.getElementById("prop-shapeType"); if (st) st.addEventListener("change", () => { o.type = st.value; pushHistory(); render(); buildProps(); });
   ["lineStyle","startCap","endCap"].forEach((k) => { const el = document.getElementById("prop-"+k); if (el) el.addEventListener("change", () => applyProp(o, k, el.value)); });
   const tx = document.getElementById("prop-text"); if (tx) tx.addEventListener("input", () => { o.text = tx.value; autoSizeText(o); render(); buildObjectList(); });
-  const filled = document.getElementById("prop-filled"); if (filled) filled.addEventListener("change", () => { o.filled = filled.checked; if (o.filled) o.fill = o.stroke; pushHistory(); render(); buildProps(); });
-  const bg = document.getElementById("prop-bg"); if (bg) bg.addEventListener("change", () => { o.bg = bg.checked; pushHistory(); render(); buildProps(); });
+  const filled = document.getElementById("prop-filled"); if (filled) filled.addEventListener("change", () => { o.filled = filled.checked; if (o.filled) o.fill = o.stroke; rememberToolProp(o.type, "filled", o.filled); if (o.filled) rememberToolProp(o.type, "fill", o.fill); pushHistory(); render(); buildProps(); });
+  const bg = document.getElementById("prop-bg"); if (bg) bg.addEventListener("change", () => { o.bg = bg.checked; rememberToolProp(o.type, "bg", o.bg); pushHistory(); render(); buildProps(); });
 
   propsContent.querySelectorAll("[data-act]").forEach((btn) => btn.addEventListener("click", () => layerAction(o, btn.dataset.act)));
 
@@ -2201,6 +2210,17 @@ function cpwCancel() {
   cpwDom.overlay.style.display = "none";
 }
 
+// Style properties worth carrying over to the next object created with the same
+// tool. Deliberately excludes position/size (x/y/w/h/x1/y1/x2/y2), "number"
+// (auto-incrementing), "rotation" and "text" content, since those are specific
+// to where/how one particular object was placed, not a reusable style choice.
+const REMEMBERED_PROP_KEYS = ["stroke", "strokeWidth", "fill", "filled", "opacity", "radius", "lineStyle", "startCap", "endCap", "fontSize", "fontFamily", "fontWeight", "fontColor", "bg", "bgColor"];
+function rememberToolProp(type, key, val) {
+  if (!REMEMBERED_PROP_KEYS.includes(key)) return;
+  if (!state.toolPropDefaults[type]) state.toolPropDefaults[type] = {};
+  state.toolPropDefaults[type][key] = val;
+}
+
 function applyProp(o, key, val) {
   if (key === "fontSize") { o.fontSize = val; autoSizeText(o); }
   else if (o.type === "text" && (key === "w" || key === "h")) {
@@ -2208,6 +2228,7 @@ function applyProp(o, key, val) {
     o[key] = Math.max(val, key === "w" ? min.w : min.h);
   }
   else o[key] = val;
+  rememberToolProp(o.type, key, val);
   render(); pushHistoryDebounced();
   if (key === "lineStyle" || key === "startCap" || key === "endCap" || key === "number") buildObjectList();
 }
