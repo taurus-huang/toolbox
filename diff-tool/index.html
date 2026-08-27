@@ -101,7 +101,7 @@
   .tbtn svg{width:20px;height:20px;flex-shrink:0;display:block;}
   .tbtn svg.icon-lg{width:23px;height:23px;}
   .pathrow .swap-btn svg{width:20px;height:20px;display:block;}
-  .actbtn svg{width:15px;height:15px;display:block;}
+  .actbtn svg{width:18px;height:18px;display:block;}
 
   /* Path bar */
   .pathbar{
@@ -113,19 +113,23 @@
     flex:1;display:flex;align-items:center;gap:4px;
     padding:4px 6px;min-width:0;
   }
-  /* The editor area below has 30px gutters on the outer edges and 24px
+  /* The editor area below has 30px gutters on the outer edges and 64px
      connector strips between panes, neither of which this path row
-     reproduces (it uses a single 40px swap-cell as its only divider
-     instead, and no outer spacer at all). Solving for where the swap-cell
-     needs to sit so its center lines up with the connector's center below
-     it works out to a constant 38px of extra width on the left/right
-     cells over the middle cell (mid keeps flex-basis 0 from the `flex:1`
-     shorthand above), independent of the row's actual pixel width -- so
-     it stays correct at any window size. This has no effect in 2-way
-     mode, where left/right are the only two cells and an identical extra
-     offset on both just cancels out. */
+     reproduces (it uses a single swap-cell -- now also 64px wide, to match
+     the connector, so their edges (not just centers) line up -- as its
+     only divider instead, and no outer spacer at all). Solving for where
+     the swap-cell needs to sit so it lines up with the connector below it
+     works out to a constant (gutter_width + (swap_cell_width -
+     connector_width)/2)px of extra width on the left/right cells over the
+     middle cell (mid keeps flex-basis 0 from the `flex:1` shorthand
+     above), independent of the row's actual pixel width -- so it stays
+     correct at any window size. Since the swap-cell and connector are now
+     the same width, that second term drops out, leaving just the 30px
+     gutter width. This has no effect in 2-way mode, where left/right are
+     the only two cells and an identical extra offset on both just
+     cancels out. */
   .pathrow .col-label:not(#pathcol-mid){
-    flex-basis:38px;
+    flex-basis:30px;
   }
   .pathrow input[type=text]{
     flex:1;background:var(--input-bg);border:1px solid var(--border);color:var(--text);
@@ -144,7 +148,7 @@
      the button inside has clear breathing room on every side, same as any
      other toolbar button, instead of filling the cell edge-to-edge. */
   .pathrow .swap-cell{
-    flex-shrink:0;width:40px;align-self:stretch;
+    flex-shrink:0;width:64px;align-self:stretch;
     background:var(--swap-cell-bg);border-left:1px solid var(--border);border-right:1px solid var(--border);
     display:flex;align-items:center;justify-content:center;
   }
@@ -232,8 +236,9 @@
 
   /* Gap marker: shown between two real lines to mark where content was
      added/deleted on the other side. Takes up no vertical space of its
-     own (height:0) -- it's not a visible row at all -- but its merge/
-     delete action buttons still float at that seam so they stay usable. */
+     own (height:0) -- it's not a visible row at all. Its merge button (if
+     any) is rendered in the connector strip instead, positioned at this
+     same seam -- see registerActionButtons / renderConnectorButtons. */
   .gap-line{
     display:flex;align-items:center;height:0;position:relative;width:100%;
     overflow:visible;
@@ -253,11 +258,6 @@
   .gap-line.diff-add::after{background:var(--diff-add-border);}
   .gap-line.diff-del::after{background:var(--diff-del-border);}
   .gap-line.diff-mod::after{background:var(--diff-mod-border);}
-  .gap-line .actions{
-    position:sticky;right:4px;margin-left:auto;height:20px;display:flex;
-    align-items:center;gap:3px;z-index:6;flex-shrink:0;
-    user-select:none;
-  }
 
   /* diff highlight backgrounds */
   .line.diff-mod{background:var(--diff-mod-line);}
@@ -296,9 +296,8 @@
      row's own diff type. Uses a border on an absolutely-positioned
      pseudo-element (not a background+height box) so the row's actual
      layout math is unaffected and the browser renders a crisp single
-     device pixel the same way on both edges; a low z-index keeps them
-     beneath the sticky .actions button layer (z-index:5) so they never
-     cover the merge/delete buttons. */
+     device pixel the same way on both edges; kept at a low z-index in
+     case anything else in the row is ever layered on top of it. */
   .line.diff-block-start::before{
     content:'';position:absolute;left:0;right:0;top:0;height:0;
     border-top:1px solid transparent;
@@ -317,28 +316,16 @@
   .line.diff-del.diff-block-end::after{border-bottom-color:var(--diff-del-border);}
 
 
-  /* Action icons for each diff block, always visible (right edge of content) */
-  .line .actions{
-    position:sticky;right:4px;margin-left:auto;height:20px;display:flex;
-    align-items:center;gap:3px;z-index:5;flex-shrink:0;
-    user-select:none;
-  }
+  /* Shared merge-button look. Used by the connector-strip buttons (see
+     .connector-actions above) -- the buttons themselves used to live
+     inline at the right edge of each line, but the class/appearance is
+     unchanged, only where it's mounted moved. */
   .actbtn{
-    width:18px;height:18px;border-radius:3px;background:var(--checkbox-bg);border:1px solid var(--border);
+    width:18px;height:18px;border-radius:3px;background:transparent;border:none;
     color:var(--checkbox-text);display:flex;align-items:center;justify-content:center;font-size:11px;
     cursor:pointer;line-height:1;padding:0;
   }
-  .actbtn:hover{background:var(--accent);}
-
-  /* While the user is actively drag-selecting text (see
-     setupMultiLineSelection), let mouse hit-testing pass straight through
-     the sticky merge/delete buttons instead of landing on them -- they sit
-     on top of the line's text, and in narrower panes (e.g. 3-way mode,
-     where three columns share the width) they can cover enough of a line
-     that a drag crossing that row keeps "landing" on the button instead of
-     the text underneath, breaking the selection. Button clicks are
-     unaffected since this class is only present during an actual drag. */
-  #editor-wrap.is-selecting .actions{ pointer-events:none; }
+  .actbtn:hover{filter:brightness(1.15);}
 
   /* Gutter (between panes) showing overview diff markers - fixed minimap */
   .gutter{
@@ -347,12 +334,28 @@
   }
   /* Connector strip between panes: no color fill, just lines linking the
      diff regions on the left side of the strip to the same regions on the
-     right side, following each pane's current vertical scroll position. */
+     right side, following each pane's current vertical scroll position.
+     Also hosts the merge buttons for each diff row (see .connector-actions
+     below) -- widened from the original 24px so both a "merge to right"
+     and a "merge to left" button (18px each) fit side by side with a
+     clear gap between them, Meld-style. */
   .connector{
-    width:24px;flex-shrink:0;background:var(--swap-cell-bg);border-left:1px solid var(--border);border-right:1px solid var(--border);
+    width:64px;flex-shrink:0;background:var(--swap-cell-bg);border-left:1px solid var(--border);border-right:1px solid var(--border);
     position:relative;overflow:hidden;
   }
   .connector-svg{position:absolute;left:0;top:0;width:100%;height:100%;}
+  /* Overlay for the merge buttons that used to live inside each pane's own
+     row (see buildActionButtonHtml). Sits above the SVG diff-link lines;
+     the container itself ignores clicks everywhere except on an actual
+     button, so the diff-link graphics underneath stay purely visual. */
+  .connector-actions{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;}
+  .connector-actions .actbtn{position:absolute;pointer-events:auto;}
+  /* While drag-selecting text (see setupMultiLineSelection), let mouse
+     hit-testing pass straight through these buttons too, same reasoning
+     as the sticky action buttons used to need before they moved here --
+     a drag that happens to pass over the connector strip shouldn't ever
+     "land" on a merge button. */
+  #editor-wrap.is-selecting .connector-actions .actbtn{pointer-events:none;}
   .connector-fill{stroke:none;}
   .connector-fill.add{fill:var(--diff-add-line);}
   .connector-fill.del{fill:var(--diff-del-line);}
@@ -475,7 +478,7 @@
 <!-- ============ PATH BAR ============ -->
 <div class="pathbar" id="pathbar">
   <div class="pathrow">
-    <div class="col-label">
+    <div class="col-label" id="pathcol-left">
       <input type="text" id="path-left" placeholder="Left file" readonly>
       <div class="filebtns">
         <button class="tbtn" data-act="undo" data-col="left" title="Undo"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><path fill="#fff" d="M12.5,8C9.85,8,7.45,8.99,5.6,10.6L2,7v9h9l-3.62-3.62c1.39-1.16,3.16-1.88,5.12-1.88c3.54,0,6.55,2.31,7.6,5.5l2.37-0.78C21.08,11.03,17.15,8,12.5,8z"/></svg></button>
@@ -504,7 +507,7 @@
     <div class="swap-cell" id="swapcell-mid-right">
       <button class="swap-btn" data-swap-a="mid" data-swap-b="right" title="Swap middle and right files"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><rect x="8" y="11" width="8" height="2" fill="#fff"/><polygon points="2,12 8,7 8,17" fill="#fff"/><polygon points="22,12 16,7 16,17" fill="#fff"/></svg></button>
     </div>
-    <div class="col-label">
+    <div class="col-label" id="pathcol-right">
       <input type="text" id="path-right" placeholder="Right file" readonly>
       <div class="filebtns">
         <button class="tbtn" data-act="undo" data-col="right" title="Undo"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><path fill="#fff" d="M12.5,8C9.85,8,7.45,8.99,5.6,10.6L2,7v9h9l-3.62-3.62c1.39-1.16,3.16-1.88,5.12-1.88c3.54,0,6.55,2.31,7.6,5.5l2.37-0.78C21.08,11.03,17.15,8,12.5,8z"/></svg></button>
@@ -525,12 +528,12 @@
     <div class="pane-scroll" id="scroll-left"><div id="lines-left"></div></div>
     <div class="pane-empty-hint" id="empty-left">Drag and drop a file here</div>
   </div>
-  <div class="connector" id="connector-lm"><svg class="connector-svg" id="connector-lm-svg"></svg></div>
+  <div class="connector" id="connector-lm"><svg class="connector-svg" id="connector-lm-svg"></svg><div class="connector-actions" id="connector-lm-actions"></div></div>
   <div class="pane" id="pane-mid">
     <div class="pane-scroll" id="scroll-mid"><div id="lines-mid"></div></div>
     <div class="pane-empty-hint" id="empty-mid">Drag and drop a file here</div>
   </div>
-  <div class="connector" id="connector-mr"><svg class="connector-svg" id="connector-mr-svg"></svg></div>
+  <div class="connector" id="connector-mr"><svg class="connector-svg" id="connector-mr-svg"></svg><div class="connector-actions" id="connector-mr-actions"></div></div>
   <div class="pane" id="pane-right">
     <div class="pane-scroll" id="scroll-right"><div id="lines-right"></div></div>
     <div class="pane-empty-hint" id="empty-right">Drag and drop a file here</div>
@@ -581,6 +584,11 @@ const state = {
   // same gap-only block forever. Null whenever the caret is on a genuine
   // line (typed content or a real diff row).
   cursorGapAnchor: null,
+  // Merge buttons for the current render pass, grouped by which connector
+  // strip they belong in -- repopulated by registerActionButtons/
+  // pushConnectorButton during renderColumn, drawn by renderConnectorButtons.
+  connectorButtonsLM: [],
+  connectorButtonsMR: [],
 };
 
 function splitLines(text){
@@ -1144,17 +1152,76 @@ function lineHtmlWithDiff(text, otherText, side){
   return html;
 }
 
-function buildActionButtons(rowIdx, col, hasLeftPane, hasRightPane){
+/* Registers this row's merge button(s) to be drawn later in the connector
+   strip between panes (see renderConnectorButtons), rather than building
+   inline HTML embedded in the pane's own row -- renderColumn's per-run/
+   per-segment gating logic (shownButtonForRun, the mid-column
+   effHasLeftPane/effHasRightPane narrowing, etc.) is unchanged, this just
+   redirects where each button ends up. */
+function registerActionButtons(rowIdx, col, hasLeftPane, hasRightPane, isGap){
   // col: 'left' | 'mid' | 'right'
-  let html = '<div class="actions">';
-  if(hasLeftPane){
-    html += `<button class="actbtn" data-action="copy-left" data-row="${rowIdx}" data-col="${col}" title="Merge to left"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><rect x="9" y="11" width="9" height="2" fill="#fff"/><polygon points="4,12 10,7 10,17" fill="#fff"/></svg></button>`;
+  if(hasLeftPane) pushConnectorButton(col, 'copy-left', rowIdx, isGap);
+  if(hasRightPane) pushConnectorButton(col, 'copy-right', rowIdx, isGap);
+}
+
+/* Maps a button's source column + merge direction to the connector strip
+   that visually sits between the source and destination panes, and to
+   which side of that strip it belongs on. Meld-style: a button sits on
+   the side of the strip nearer its OWN (source) pane -- "merge to right"
+   on the left/source side, "merge to left" on the right/source side. */
+function pushConnectorButton(col, action, rowIdx, isGap){
+  let connKey = null, side = null;
+  if(action === 'copy-right'){
+    if(col === 'left'){ connKey = 'LM'; side = 'left'; }
+    else if(col === 'mid'){ connKey = 'MR'; side = 'left'; }
+    // col==='right' has no pane to its right; hasRightPane is already
+    // false for it by the time registerActionButtons is called.
+  } else { // copy-left
+    if(col === 'mid'){ connKey = 'LM'; side = 'right'; }
+    else if(col === 'right'){
+      // In 2-way mode there is no mid pane/connector-mr at all -- left and
+      // right sit directly across the single connector-lm strip instead.
+      connKey = state.mode==='3way' ? 'MR' : 'LM';
+      side = 'right';
+    }
   }
-  if(hasRightPane){
-    html += `<button class="actbtn" data-action="copy-right" data-row="${rowIdx}" data-col="${col}" title="Merge to right"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><rect x="6" y="11" width="9" height="2" fill="#fff"/><polygon points="20,12 14,7 14,17" fill="#fff"/></svg></button>`;
+  if(!connKey) return;
+  const arr = connKey==='LM' ? state.connectorButtonsLM : state.connectorButtonsMR;
+  arr.push({rowIdx, col, action, isGap, side});
+}
+
+/* Builds the HTML for one connector strip's buttons from its registered
+   list, positioning each one at its row's current on-screen y (same
+   layout/scroll math renderConnector uses for the diff-link lines) so it
+   tracks that row's own pane precisely as it scrolls. */
+function buildConnectorButtonsHtml(list){
+  let html = '';
+  for(const btn of list){
+    const scrollEl = document.getElementById('scroll-' + btn.col);
+    const scrollTop = scrollEl ? scrollEl.scrollTop : 0;
+    const rowH = btn.isGap ? 0 : LINE_H; // gap markers sit at a zero-height seam
+    const centerY = offsetForRow(btn.col, btn.rowIdx) - scrollTop + rowH/2;
+    const top = centerY - 9; // half of the 18px button height
+    const sideCss = btn.side==='left' ? 'left:1px;' : 'right:1px;';
+    const isLeft = btn.action==='copy-left';
+    const title = isLeft ? 'Merge to left' : 'Merge to right';
+    const iconHtml = isLeft
+      ? `<rect x="11" y="10.2" width="9" height="3.6" fill="#fff"/><polygon points="4,12 12,6.5 12,17.5" fill="#fff"/>`
+      : `<rect x="5" y="10.2" width="9" height="3.6" fill="#fff"/><polygon points="21,12 13,6.5 13,17.5" fill="#fff"/>`;
+    html += `<button class="actbtn" style="top:${top.toFixed(1)}px;${sideCss}" data-action="${btn.action}" data-row="${btn.rowIdx}" data-col="${btn.col}" title="${title}"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/>${iconHtml}</svg></button>`;
   }
-  html += '</div>';
   return html;
+}
+
+/* Redraws both connector strips' merge buttons from the lists registered
+   during the last renderColumn pass. Called from renderConnectors() so it
+   refreshes at exactly the same times as the diff-link SVG lines (full
+   render and every scroll), keeping button position in sync. */
+function renderConnectorButtons(){
+  const lmEl = document.getElementById('connector-lm-actions');
+  if(lmEl) lmEl.innerHTML = buildConnectorButtonsHtml(state.connectorButtonsLM || []);
+  const mrEl = document.getElementById('connector-mr-actions');
+  if(mrEl) mrEl.innerHTML = state.mode==='3way' ? buildConnectorButtonsHtml(state.connectorButtonsMR || []) : '';
 }
 
 function render(){
@@ -1168,6 +1235,8 @@ function render(){
   document.getElementById('swapcell-mid-right').classList.toggle('hidden', mode!=='3way');
   document.getElementById('swapcell-left-right-2way').classList.toggle('hidden', mode==='3way');
 
+  state.connectorButtonsLM = [];
+  state.connectorButtonsMR = [];
   renderColumn('left');
   if(mode==='3way') renderColumn('mid');
   renderColumn('right');
@@ -1325,7 +1394,6 @@ function renderColumn(col){
     const curCls = pendingGap.current ? ' gap-current' : '';
     const edgeCls = (pendingGap.blockStart ? ' diff-block-start' : '') + (pendingGap.blockEnd ? ' diff-block-end' : '');
     const label = pendingGap.type==='add' ? 'Content added here' : pendingGap.type==='del' ? 'Content deleted here' : 'Content changed here';
-    let actionsHtml = '';
     if(pendingGap.showButton){
       let effHasLeftPane = hasLeftPane;
       let effHasRightPane = hasRightPane;
@@ -1335,12 +1403,11 @@ function renderColumn(col){
         if(!pendingGap.leftHasContent) effHasLeftPane = false;
         if(!pendingGap.rightHasContent) effHasRightPane = false;
       }
-      actionsHtml = buildActionButtons(pendingGap.rowIdx, col, effHasLeftPane, effHasRightPane);
+      registerActionButtons(pendingGap.rowIdx, col, effHasLeftPane, effHasRightPane, true);
     }
     html += `<div class="gap-line ${typeCls}${curCls}${edgeCls}" title="${label}">`
           + `<div class="gap-num"></div>`
           + `<div class="gap-bar-wrap"><div class="gap-bar"></div></div>`
-          + actionsHtml
           + `</div>`;
     pendingGap = null;
   };
@@ -1400,7 +1467,6 @@ function renderColumn(col){
     let lineNum = '';
     let content = '';
     let editable = 'false';
-    let actionsHtml = '';
 
     lineNum = (cell.idx+1).toString();
     editable = 'true';
@@ -1468,7 +1534,7 @@ function renderColumn(col){
           if(cls.left==='equal') effHasLeftPane = false;
           if(cls.right==='equal') effHasRightPane = false;
         }
-        actionsHtml = buildActionButtons(i, col, effHasLeftPane, effHasRightPane);
+        registerActionButtons(i, col, effHasLeftPane, effHasRightPane, false);
         shownButtonForRun = true;
       }
       lastRunStatus = status;
@@ -1477,7 +1543,6 @@ function renderColumn(col){
     html += `<div class="${lineClasses}" data-row="${i}" data-col="${col}">`
           + `<div class="num">${lineNum}</div>`
           + `<div class="content" contenteditable="${editable}" spellcheck="false" data-row="${i}" data-col="${col}" data-line-idx="${cell.idx}">${content}</div>`
-          + actionsHtml
           + `</div>`;
   }
   // Trailing gap at the very end of the file (e.g. deleted/added last lines)
@@ -1501,6 +1566,42 @@ function renderGutters(){
     renderOneGutter('gutter-mr-track', 'left', 'right', 'right');
   }
   updateGutterViewport();
+  syncPathRowWidths();
+}
+
+/* The CSS flex-basis on the path row's col-labels (see the comment above
+   that rule) gets the swap-cells lined up with their connectors correctly
+   in principle, but the path row and the editor row are two separate
+   flex containers laid out independently -- browsers can round each
+   one's sub-pixel item widths slightly differently, and with two
+   dividers in 3-way mode that drift compounds enough to be visible at
+   the second one (mid/right), even though it's imperceptible at the
+   first. Rather than chase that with more CSS math, measure the actual
+   rendered connector positions after layout and set each col-label's
+   width to match exactly -- this stays pixel-exact regardless of
+   rounding, window width, or a future connector-width change. */
+function syncPathRowWidths(){
+  const pathrow = document.querySelector('.pathrow');
+  const leftLabel = document.getElementById('pathcol-left');
+  const rightLabel = document.getElementById('pathcol-right');
+  const midLabel = document.getElementById('pathcol-mid');
+  const connLm = document.getElementById('connector-lm');
+  if(!pathrow || !leftLabel || !rightLabel || !connLm) return;
+
+  const rowRect = pathrow.getBoundingClientRect();
+  if(rowRect.width === 0) return; // pathbar not visible/laid out yet
+
+  const lmRect = connLm.getBoundingClientRect();
+  leftLabel.style.flex = `0 0 ${(lmRect.left - rowRect.left).toFixed(2)}px`;
+
+  if(state.mode==='3way'){
+    const connMr = document.getElementById('connector-mr');
+    const mrRect = connMr ? connMr.getBoundingClientRect() : lmRect;
+    if(midLabel) midLabel.style.flex = `0 0 ${(mrRect.left - lmRect.right).toFixed(2)}px`;
+    rightLabel.style.flex = `0 0 ${(rowRect.right - mrRect.right).toFixed(2)}px`;
+  } else {
+    rightLabel.style.flex = `0 0 ${(rowRect.right - lmRect.right).toFixed(2)}px`;
+  }
 }
 
 /* ownCol is the column whose real (post-gap-collapse) row layout this
@@ -1550,7 +1651,7 @@ function renderConnector(svgId, leftPaneCol, rightPaneCol, baseCol){
   const svg = document.getElementById(svgId);
   if(!svg) return;
   const wrapper = svg.parentElement;
-  const w = wrapper.clientWidth || 24;
+  const w = wrapper.clientWidth || 64;
   const h = wrapper.clientHeight || 400;
 
   const otherCol = baseCol===leftPaneCol ? rightPaneCol : leftPaneCol;
@@ -1587,6 +1688,7 @@ function renderConnectors(){
   } else {
     renderConnector('connector-lm-svg', 'left', 'right', 'left');
   }
+  renderConnectorButtons();
 }
 
 /* Update the viewport indicator rectangle on all visible gutters.
