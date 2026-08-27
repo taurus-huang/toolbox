@@ -1383,13 +1383,15 @@ canvas.addEventListener("mousedown", (e) => {
     return;
   }
   const p = toWorld(e);
+  // Resize/rotate handles on the currently selected single object stay interactive
+  // no matter which tool is active, so a just-created object can be tweaked without
+  // switching back to Select (which would otherwise interrupt continuous creation).
+  const sel = state.selectedIds.length === 1 ? state.objects.find((o) => o.id === state.selectedId) : null;
+  if (sel) {
+    const h = hitHandle(sel, p);
+    if (h) { startTransform(sel, h, p); return; }
+  }
   if (state.tool === "select") {
-    // Resize/rotate handles only appear (and only apply) for a single selected object.
-    const sel = state.selectedIds.length === 1 ? state.objects.find((o) => o.id === state.selectedId) : null;
-    if (sel) {
-      const h = hitHandle(sel, p);
-      if (h) { startTransform(sel, h, p); return; }
-    }
     const hit = hitObject(p);
     const ctrlKey = e.ctrlKey || e.metaKey;
     if (hit) {
@@ -1421,7 +1423,6 @@ canvas.addEventListener("mousedown", (e) => {
     state.objects.push(o);
     selectOnly(o.id);
     if (state.tool === "text" || state.tool === "number") {
-      state.tool = "select"; updateToolUI();
       pushHistory(); render(); buildProps();
       if (o.type === "text") setTimeout(() => { const t = document.getElementById("prop-text"); if (t) { t.focus(); t.select(); } }, 30);
     } else {
@@ -1558,7 +1559,8 @@ window.addEventListener("mouseup", (e) => {
       o.w = o.type === "number" ? 44 : 120; o.h = o.type === "number" ? 44 : 80;
       o.x -= o.w / 2; o.y -= o.h / 2;
     }
-    state.tool = "select"; updateToolUI();
+    // Tool stays active (rather than switching to Select) so the same button
+    // can be used to draw several objects in a row.
   }
   action = null;
   pushHistory();
@@ -1566,10 +1568,11 @@ window.addEventListener("mouseup", (e) => {
 });
 
 function updateCursor(e) {
-  if (!baseCanvas || state.tool !== "select") { canvas.style.cursor = "crosshair"; return; }
+  if (!baseCanvas) { canvas.style.cursor = "crosshair"; return; }
   const p = toWorld(e);
-  const sel = state.objects.find((o) => o.id === state.selectedId);
+  const sel = state.selectedIds.length === 1 ? state.objects.find((o) => o.id === state.selectedId) : null;
   if (sel && hitHandle(sel, p)) { canvas.style.cursor = "pointer"; return; }
+  if (state.tool !== "select") { canvas.style.cursor = "crosshair"; return; }
   canvas.style.cursor = hitObject(p) ? "move" : "crosshair";
 }
 
