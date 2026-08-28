@@ -1655,6 +1655,13 @@ function setupOneResizeHandle(handleId, paneAId, getPaneBId){
       // -- just swapped for the dragged ratio instead of always-equal.
       paneA.style.flex = newWA + ' 1 0%';
       paneB.style.flex = newWB + ' 1 0%';
+      // Re-measure each column's forced content width against its pane's
+      // new size -- otherwise a pane narrowed below its last-measured
+      // width (most obviously when it's empty, or its content is shorter
+      // than the pane) keeps a stale wider width pinned from before,
+      // which shows up as a bogus horizontal scrollbar with nothing
+      // actually needing it.
+      equalizeColumnWidths();
       // Connector position shifts with the panes; keep the path row's
       // swap-cell tracking it live instead of only after mouseup.
       syncPathRowWidths();
