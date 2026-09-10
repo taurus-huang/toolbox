@@ -3056,6 +3056,21 @@ document.getElementById('editor-wrap').addEventListener('beforeinput', (e)=>{
     }catch(err){ /* point briefly resolved to an invalid range mid-drag; ignore */ }
   }
 
+  /* Whether (x,y) falls inside the current (possibly cross-line) selection.
+     Range.comparePoint compares plain document position, so it works here
+     even though the selection's two ends can sit in two different
+     per-line contenteditable divs -- it doesn't care that they're
+     separate editable roots, only where they fall in document order. */
+  function isPointWithinSelection(x, y){
+    const sel = window.getSelection();
+    if(!sel || sel.rangeCount===0 || sel.isCollapsed) return false;
+    const caret = caretFromPoint(x, y);
+    if(!caret) return false;
+    const range = sel.getRangeAt(0);
+    try{ return range.comparePoint(caret.node, caret.offset) === 0; }
+    catch(err){ return false; }
+  }
+
   function scrollElForCol(col){
     if(col === 'left') return document.getElementById('scroll-left');
     if(col === 'mid') return document.getElementById('scroll-mid');
@@ -3129,6 +3144,20 @@ document.getElementById('editor-wrap').addEventListener('beforeinput', (e)=>{
   }
 
   editorWrapEl.addEventListener('mousedown', (e)=>{
+    if(e.button === 2){
+      // Right-click: a browser normally leaves an existing selection alone
+      // (and shows "Copy" in its context menu) as long as the click lands
+      // inside it, only collapsing it to the click point otherwise. But
+      // since each line here is its own separate contenteditable div (see
+      // renderColumn), a selection spanning more than one line is a range
+      // straddling multiple editable roots rather than the single-field
+      // selection the browser expects, and its default mousedown handling
+      // clears that instead of recognizing the click as "inside" it.
+      // Detect that case ourselves and suppress the default handling so
+      // the selection -- and with it, native right-click > Copy -- survives.
+      if(isPointWithinSelection(e.clientX, e.clientY)) e.preventDefault();
+      return;
+    }
     if(e.button !== 0) return; // left button only
     if(e.detail > 1) return; // let native double/triple-click word/line selection behave normally
     const contentEl = e.target.closest('.content[contenteditable="true"]');
