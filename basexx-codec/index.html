@@ -1,0 +1,1436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BaseXX Codec</title>
+<meta name="tool-name" content="BaseXX Codec">
+<meta name="tool-version" content="">
+<meta name="tool-desc" content="Supports Base16, Base64, Base85, Base91 encode/decode.">
+<meta name="tool-desc" content="Supports drag-and-drop file.">
+<meta name="tool-desc" content="Entirely local processing, no data uploaded.">
+<style>
+  :root{
+    --bg: #0e1013;
+    --panel: #14171c;
+    --panel-2: #171b21;
+    --border: #262b33;
+    --border-strong: #3a414c;
+    --text: #e7e4dd;
+    --text-dim: #868c97;
+    --text-faint: #565c66;
+    --accent: #7fb1ff;
+    --action: #4c8ef5;
+    --action-soft: rgba(76, 142, 245, 0.22);
+    --handle-hover: #7fb1ff;
+    --danger: #e0654f;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  html[data-theme="light"] {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --panel-2: #eef0f3;
+    --border: #dde1e6;
+    --border-strong: #c3c9d1;
+    --text: #1a1d21;
+    --text-dim: #5b6270;
+    --text-faint: #98a0ab;
+    --accent: #2f6fe0;
+    --action: #2f6fe0;
+    --action-soft: rgba(47, 111, 224, 0.12);
+    --handle-hover: #2f6fe0;
+    --danger: #c0392b;
+  }
+
+  * { box-sizing: border-box; }
+
+  /* Scrollbars for every scrollable area (hex view, textareas, and the page
+     itself) styled to match the current theme instead of the browser
+     default. Built entirely from the existing CSS variables, so a future
+     light/dark toggle just needs to update those variables — nothing here
+     needs to change. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) var(--panel-2);
+  }
+  *::-webkit-scrollbar {
+    width: 11px;
+    height: 11px;
+  }
+  *::-webkit-scrollbar-track {
+    background: var(--panel-2);
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--border-strong);
+    border-radius: 999px;
+    border: 2px solid var(--panel-2);
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--handle-hover);
+  }
+  *::-webkit-scrollbar-corner {
+    background: var(--panel-2);
+  }
+
+  html, body {
+    min-height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+
+  header.top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+
+  .brand { display: flex; align-items: center; gap: 20px; }
+
+  .brand .mark {
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--accent);
+    letter-spacing: 0.02em;
+  }
+
+  .brand h1 {
+    font-size: 17px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+
+  .brand .sub {
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+
+  .format-control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+
+  select#formatSelect {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--action);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-family: var(--mono);
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  select#formatSelect:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  }
+
+  main.workbench {
+    flex: 1;
+    display: flex;
+    align-items: stretch;
+    padding: 20px 24px;
+    width: 100%;
+    max-width: 1600px;
+    margin: 0 auto;
+    min-height: 0;
+  }
+
+  .panel {
+    display: flex;
+    flex-direction: column;
+    min-width: 220px;
+    flex: 1 1 0%;
+    min-height: 0;
+  }
+
+  .panel-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding-bottom: 8px;
+    margin-bottom: 10px;
+  }
+
+  .panel-head .label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .panel-head .meta {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--text-faint);
+  }
+
+  .icon-btn-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 8px;
+  }
+
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: var(--panel-2);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: border-color 120ms ease, color 120ms ease;
+  }
+
+  .icon-btn svg {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+  }
+
+  .icon-btn:hover { border-color: var(--action); color: var(--text); }
+  .icon-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  }
+  .icon-btn.copied { border-color: var(--accent); color: var(--accent); }
+
+  .panel-head-left {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .view-toggle {
+    display: inline-flex;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .view-toggle-btn {
+    background: var(--panel-2);
+    color: var(--text-dim);
+    border: none;
+    font-family: var(--sans);
+    font-size: 12px;
+    line-height: 1;
+    width: 54px;
+    padding: 4px 0;
+    text-align: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
+  }
+
+  .view-toggle-btn:not(:first-child) { border-left: 1px solid var(--border-strong); }
+  .view-toggle-btn:hover:not(.is-active) { color: var(--text); }
+  .view-toggle-btn.is-active { background: var(--action); color: var(--bg); font-weight: 600; }
+  .view-toggle-btn:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+
+  .hex-view {
+    position: absolute;
+    inset: 0;
+    overflow: auto;
+    box-sizing: border-box;
+    padding: 14px 16px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.7;
+    user-select: none;
+  }
+
+  .hex-view[hidden] { display: none; }
+
+  .hex-row {
+    display: flex;
+    gap: 16px;
+    white-space: pre;
+  }
+
+  .hex-offset {
+    flex: 0 0 60px;
+    color: var(--text-faint);
+  }
+
+  .hex-bytes {
+    flex: 0 0 auto;
+    color: var(--text);
+    letter-spacing: 0.02em;
+  }
+
+  .hex-ascii {
+    color: var(--text-dim);
+    border-left: 1px solid var(--border);
+    padding-left: 14px;
+  }
+
+  .hex-byte,
+  .hex-char {
+    cursor: default;
+    border-radius: 2px;
+  }
+
+  .hex-selected {
+    background: var(--action);
+    color: var(--bg);
+  }
+
+  .hex-offset.hex-active,
+  .hex-col-header.hex-active {
+    background: var(--action-soft);
+    color: var(--text);
+    border-radius: 3px;
+  }
+
+  .hex-header-row {
+    padding-bottom: 6px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .hex-header-row .hex-bytes,
+  .hex-header-row .hex-ascii {
+    color: var(--text-faint);
+  }
+
+  .hex-note {
+    margin-top: 10px;
+    font-family: var(--sans);
+    font-size: 11.5px;
+    color: var(--text-faint);
+  }
+  .hex-empty {
+    color: var(--text-faint);
+    user-select: none;
+  }
+  .field {
+    position: relative;
+    flex: 1;
+    min-height: 420px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    transition: border-color 120ms ease, background 120ms ease;
+    overflow: hidden;
+  }
+
+  .field.dragover {
+    border-color: var(--action);
+    background: #10182e;
+  }
+
+  textarea {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 420px;
+    resize: none;
+    background: transparent;
+    color: var(--text);
+    border: none;
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.6;
+    letter-spacing: 0.01em;
+  }
+
+  textarea::placeholder { color: var(--text-faint); }
+  textarea[hidden] { display: none; }
+  textarea:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--border-strong);
+  }
+
+  /* --- middle draggable splitter column --- */
+  .controls {
+    flex: 0 0 116px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 46px;
+    position: relative;
+    padding: 0 8px;
+    touch-action: none;
+  }
+
+  /* thin decorative line spanning the full column — not interactive */
+  .controls .line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 0.5px;
+    transform: translateX(-50%);
+    background: var(--border-strong);
+    pointer-events: none;
+  }
+
+  /* short thick pill — the only part that hovers / drags */
+  .controls .handle {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 6px;
+    height: 30px;
+    transform: translate(-50%, -50%);
+    background: var(--border-strong);
+    border-radius: 999px;
+    cursor: col-resize;
+    transition: background 120ms ease;
+  }
+
+  .handle:hover,
+  .controls.dragging .handle {
+    background: var(--handle-hover);
+  }
+
+  .controls.dragging { user-select: none; }
+
+  .arrow-btn {
+    position: relative;
+    z-index: 1;
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--bg);
+    background: var(--action);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    padding: 11px 16px;
+    width: 108px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    transition: filter 120ms ease, transform 120ms ease;
+  }
+
+  .arrow-btn svg {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+  }
+
+  .arrow-btn.decode { flex-direction: row-reverse; }
+
+  .arrow-btn:hover { filter: brightness(1.1); }
+  .arrow-btn:active { transform: scale(0.97); }
+  .arrow-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  }
+
+  footer.status {
+    border-top: 1px solid var(--border);
+    padding: 10px 28px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+  }
+
+  footer.status.err { color: var(--danger); }
+
+  @media (max-width: 760px) {
+    main.workbench {
+      flex-direction: column;
+      gap: 18px;
+      padding: 20px 18px;
+    }
+    .controls {
+      flex-direction: row;
+      padding: 4px 0;
+      flex: 0 0 auto;
+    }
+    .controls .line {
+      top: 50%;
+      bottom: auto;
+      left: 0;
+      right: 0;
+      width: auto;
+      height: 0.5px;
+      transform: translateY(-50%);
+    }
+    .controls .handle {
+      width: 30px;
+      height: 6px;
+      cursor: row-resize;
+    }
+    .arrow-btn svg { transform: rotate(90deg); }
+    .field, textarea, .hex-view { min-height: 220px; }
+    header.top { padding: 16px 18px; }
+  }
+
+  /* When the viewport is both narrow (stacked layout) and short, 220px per
+     data area no longer fits alongside the header/footer/controls without
+     forcing a very tall page. Shrinking the minimum height here reduces how
+     much extra scrolling is needed; if the window is shorter still, the
+     page simply grows a vertical scrollbar rather than letting the fields
+     collapse and overlap the Encode/Decode controls. */
+  @media (max-width: 760px) and (max-height: 700px) {
+    .field, textarea, .hex-view { min-height: 140px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <h1>BaseXX Codec</h1>
+    <div class="format-control">
+      <label for="formatSelect">Format</label>
+      <select id="formatSelect">
+        <option value="base16">Base16 (Hex)</option>
+        <option value="base64" selected>Base64</option>
+        <option value="base85">Base85</option>
+        <option value="base91">Base91</option>
+      </select>
+    </div>
+  </div>
+  <button class="icon-btn theme-toggle" id="themeToggle" type="button" title="Switch to light mode" aria-label="Switch to light mode">
+    <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+  </button>
+</header>
+
+<main class="workbench" id="workbench">
+  <section class="panel" id="rawPanel">
+    <div class="panel-head">
+      <span class="panel-head-left">
+        <span class="label">Raw data</span>
+        <span class="view-toggle" id="rawViewToggle">
+          <button class="view-toggle-btn is-active" type="button" data-view="text">Text</button>
+          <button class="view-toggle-btn" type="button" data-view="hex">Hex</button>
+        </span>
+      </span>
+      <span>
+        <span class="meta" id="rawMeta">0 bytes</span>
+        <span class="icon-btn-group">
+          <button class="icon-btn" id="copyRaw" type="button" title="Copy" aria-label="Copy raw data">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+          <button class="icon-btn" id="downloadRaw" type="button" title="Download" aria-label="Download raw data">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </button>
+        </span>
+      </span>
+    </div>
+    <div class="field" id="dropZone">
+      <textarea id="rawText" placeholder="Type or paste text here, or drop a file"></textarea>
+      <div class="hex-view" id="hexView" hidden></div>
+    </div>
+  </section>
+
+  <div class="controls" id="controls">
+    <div class="line"></div>
+    <button class="arrow-btn encode" id="encodeBtn" type="button" title="Encode the raw data on the left into the field on the right">
+      Encode
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+    </button>
+    <div class="handle" id="splitterHandle" title="Drag to resize"></div>
+    <button class="arrow-btn decode" id="decodeBtn" type="button" title="Decode the data on the right into the field on the left">
+      Decode
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 5l-7 7 7 7"/></svg>
+    </button>
+  </div>
+
+  <section class="panel" id="encPanel">
+    <div class="panel-head">
+      <span class="label">Encoded data</span>
+      <span>
+        <span class="meta" id="encMeta">0 chars</span>
+        <span class="icon-btn-group">
+          <button class="icon-btn" id="copyEnc" type="button" title="Copy" aria-label="Copy encoded data">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+          <button class="icon-btn" id="downloadEnc" type="button" title="Download" aria-label="Download encoded data">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </button>
+        </span>
+      </span>
+    </div>
+    <div class="field">
+      <textarea id="encText" placeholder="Encoded output appears here — or paste an encoded string and press Decode"></textarea>
+    </div>
+  </section>
+</main>
+
+<footer class="status" id="status">Ready. Drop a file or type some text, then press Encode.</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------- theme toggle ----------
+  // In-memory only (no persistence) — an artifact/preview environment may not
+  // allow localStorage, and the app already defaults to a sensible dark theme.
+  const themeToggleBtn = document.getElementById("themeToggle");
+  const themeIcon = document.getElementById("themeIcon");
+  const SUN_PATH = '<path d="M12 4.5V2m0 20v-2.5M4.5 12H2m20 0h-2.5M5.64 5.64 4 4m16 16-1.64-1.64M18.36 5.64 20 4M4 20l1.64-1.64"/><circle cx="12" cy="12" r="5"/>';
+  const MOON_PATH = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+
+  function applyTheme(theme) {
+    if (theme === "light") {
+      document.documentElement.setAttribute("data-theme", "light");
+      themeIcon.innerHTML = SUN_PATH;
+      themeToggleBtn.title = "Switch to dark mode";
+      themeToggleBtn.setAttribute("aria-label", "Switch to dark mode");
+    } else {
+      document.documentElement.removeAttribute("data-theme");
+      themeIcon.innerHTML = MOON_PATH;
+      themeToggleBtn.title = "Switch to light mode";
+      themeToggleBtn.setAttribute("aria-label", "Switch to light mode");
+    }
+  }
+
+  themeToggleBtn.addEventListener("click", () => {
+    const isLight = document.documentElement.getAttribute("data-theme") === "light";
+    applyTheme(isLight ? "dark" : "light");
+  });
+
+  // ---------- codecs ----------
+  // Each codec: { encode(Uint8Array) -> string, decode(string) -> Uint8Array }
+  // Add new formats here (e.g. base85, base91) and enable their <option> above.
+  const B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const B64_LOOKUP = (() => {
+    const t = new Uint8Array(256).fill(255);
+    for (let i = 0; i < B64_CHARS.length; i++) t[B64_CHARS.charCodeAt(i)] = i;
+    return t;
+  })();
+
+  function base64Encode(bytes) {
+    let out = "";
+    const len = bytes.length;
+    for (let i = 0; i < len; i += 3) {
+      const b0 = bytes[i];
+      const hasB1 = i + 1 < len, hasB2 = i + 2 < len;
+      const b1 = hasB1 ? bytes[i + 1] : 0;
+      const b2 = hasB2 ? bytes[i + 2] : 0;
+      const triplet = (b0 << 16) | (b1 << 8) | b2;
+      out += B64_CHARS[(triplet >> 18) & 0x3f];
+      out += B64_CHARS[(triplet >> 12) & 0x3f];
+      out += hasB1 ? B64_CHARS[(triplet >> 6) & 0x3f] : "=";
+      out += hasB2 ? B64_CHARS[triplet & 0x3f] : "=";
+    }
+    return out;
+  }
+
+  function base64Decode(str) {
+    const clean = str.replace(/\s+/g, "").replace(/=+$/, "");
+    if (!/^[A-Za-z0-9+/]*$/.test(clean)) {
+      throw new Error("Contains characters outside the Base64 alphabet");
+    }
+    const len = clean.length;
+    const outLen = Math.floor((len * 3) / 4);
+    const bytes = new Uint8Array(outLen);
+    let p = 0;
+    for (let i = 0; i < len; i += 4) {
+      const c0 = B64_LOOKUP[clean.charCodeAt(i)];
+      const c1 = i + 1 < len ? B64_LOOKUP[clean.charCodeAt(i + 1)] : 0;
+      const c2 = i + 2 < len ? B64_LOOKUP[clean.charCodeAt(i + 2)] : 0;
+      const c3 = i + 3 < len ? B64_LOOKUP[clean.charCodeAt(i + 3)] : 0;
+      const triplet = (c0 << 18) | (c1 << 12) | (c2 << 6) | c3;
+      if (p < outLen) bytes[p++] = (triplet >> 16) & 0xff;
+      if (p < outLen) bytes[p++] = (triplet >> 8) & 0xff;
+      if (p < outLen) bytes[p++] = triplet & 0xff;
+    }
+    return bytes;
+  }
+
+  // --- Base85 (Ascii85 / Adobe variant, no <~ ~> wrapper on output; 'z' shortcut accepted on decode) ---
+  const B85_OFFSET = 33; // '!'
+
+  function base85Encode(bytes) {
+    let out = "";
+    const len = bytes.length;
+    for (let i = 0; i < len; i += 4) {
+      const n = Math.min(4, len - i);
+      const b0 = bytes[i];
+      const b1 = n > 1 ? bytes[i + 1] : 0;
+      const b2 = n > 2 ? bytes[i + 2] : 0;
+      const b3 = n > 3 ? bytes[i + 3] : 0;
+      let value = ((b0 * 256 + b1) * 256 + b2) * 256 + b3;
+      const digits = [0, 0, 0, 0, 0];
+      for (let k = 4; k >= 0; k--) {
+        digits[k] = value % 85;
+        value = Math.floor(value / 85);
+      }
+      for (let k = 0; k <= n; k++) {
+        out += String.fromCharCode(B85_OFFSET + digits[k]);
+      }
+    }
+    return out;
+  }
+
+  function base85Decode(str) {
+    let clean = str.replace(/\s+/g, "");
+    if (clean.startsWith("<~")) clean = clean.slice(2);
+    if (clean.endsWith("~>")) clean = clean.slice(0, -2);
+    clean = clean.replace(/z/g, "!!!!!"); // expand basE91's four-zero-byte shortcut
+    const bytesOut = [];
+    for (let i = 0; i < clean.length; i += 5) {
+      let group = clean.slice(i, i + 5);
+      const n = group.length;
+      if (n === 1) throw new Error("Invalid Base85 length");
+      while (group.length < 5) group += "u"; // pad with the highest digit
+      let value = 0;
+      for (let k = 0; k < 5; k++) {
+        const code = group.charCodeAt(k) - B85_OFFSET;
+        if (code < 0 || code > 84) throw new Error("Contains a character outside the Base85 alphabet");
+        value = value * 85 + code;
+      }
+      const b0 = Math.floor(value / 16777216) % 256;
+      const b1 = Math.floor(value / 65536) % 256;
+      const b2 = Math.floor(value / 256) % 256;
+      const b3 = value % 256;
+      const outBytes = [b0, b1, b2, b3].slice(0, n - 1);
+      for (const b of outBytes) bytesOut.push(b);
+    }
+    return new Uint8Array(bytesOut);
+  }
+
+  // --- Base91 (basE91, Joachim Henke's scheme) ---
+  const B91_ALPHABET =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+,./:;<=>?@[]^_`{|}~\"";
+  const B91_DECODE = new Int16Array(256).fill(-1);
+  for (let i = 0; i < B91_ALPHABET.length; i++) B91_DECODE[B91_ALPHABET.charCodeAt(i)] = i;
+
+  function base91Encode(bytes) {
+    let out = "";
+    let queue = 0, nbits = 0;
+    for (let i = 0; i < bytes.length; i++) {
+      queue |= bytes[i] << nbits;
+      nbits += 8;
+      if (nbits > 13) {
+        let val = queue & 8191;
+        if (val > 88) {
+          queue >>>= 13;
+          nbits -= 13;
+        } else {
+          val = queue & 16383;
+          queue >>>= 14;
+          nbits -= 14;
+        }
+        out += B91_ALPHABET[val % 91];
+        out += B91_ALPHABET[Math.floor(val / 91)];
+      }
+    }
+    if (nbits) {
+      out += B91_ALPHABET[queue % 91];
+      if (nbits > 7 || queue > 90) {
+        out += B91_ALPHABET[Math.floor(queue / 91)];
+      }
+    }
+    return out;
+  }
+
+  function base91Decode(str) {
+    const bytesOut = [];
+    let queue = 0, nbits = 0, val = -1;
+    for (let i = 0; i < str.length; i++) {
+      const code = str.charCodeAt(i);
+      const d = code < 256 ? B91_DECODE[code] : -1;
+      if (d === -1) continue; // silently skip whitespace / unknown characters
+      if (val === -1) {
+        val = d;
+      } else {
+        val += d * 91;
+        queue |= val << nbits;
+        nbits += (val & 8191) > 88 ? 13 : 14;
+        do {
+          bytesOut.push(queue & 0xff);
+          queue >>>= 8;
+          nbits -= 8;
+        } while (nbits > 7);
+        val = -1;
+      }
+    }
+    if (val !== -1) {
+      bytesOut.push((queue | (val << nbits)) & 0xff);
+    }
+    return new Uint8Array(bytesOut);
+  }
+
+  // --- Base16 (hex) ---
+  function base16Encode(bytes) {
+    let out = "";
+    for (let i = 0; i < bytes.length; i++) {
+      out += bytes[i].toString(16).padStart(2, "0");
+    }
+    return out;
+  }
+
+  function base16Decode(str) {
+    const clean = str.replace(/\s+/g, "");
+    if (clean.length % 2 !== 0) {
+      throw new Error("Base16 (hex) string must have an even number of characters");
+    }
+    if (!/^[0-9a-fA-F]*$/.test(clean)) {
+      throw new Error("Contains characters outside the Base16 (hex) alphabet");
+    }
+    const bytes = new Uint8Array(clean.length / 2);
+    for (let i = 0; i < clean.length; i += 2) {
+      bytes[i / 2] = parseInt(clean.substr(i, 2), 16);
+    }
+    return bytes;
+  }
+
+  const codecs = {
+    base16: { encode: base16Encode, decode: base16Decode },
+    base64: { encode: base64Encode, decode: base64Decode },
+    base85: { encode: base85Encode, decode: base85Decode },
+    base91: { encode: base91Encode, decode: base91Decode },
+  };
+
+  // ---------- elements ----------
+  const formatSelect = document.getElementById("formatSelect");
+  const rawText = document.getElementById("rawText");
+  const encText = document.getElementById("encText");
+  const dropZone = document.getElementById("dropZone");
+  const rawMeta = document.getElementById("rawMeta");
+  const encMeta = document.getElementById("encMeta");
+  const encodeBtn = document.getElementById("encodeBtn");
+  const decodeBtn = document.getElementById("decodeBtn");
+  const statusBar = document.getElementById("status");
+  const copyRaw = document.getElementById("copyRaw");
+  const copyEnc = document.getElementById("copyEnc");
+  const downloadRaw = document.getElementById("downloadRaw");
+  const downloadEnc = document.getElementById("downloadEnc");
+  const workbench = document.getElementById("workbench");
+  const controls = document.getElementById("controls");
+  const rawPanel = document.getElementById("rawPanel");
+  const encPanel = document.getElementById("encPanel");
+  const rawViewToggle = document.getElementById("rawViewToggle");
+  const hexView = document.getElementById("hexView");
+
+  // ---------- helpers ----------
+  function formatBytes(n) {
+    if (n < 1024) return n + " bytes";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+    return (n / (1024 * 1024)).toFixed(2) + " MB";
+  }
+
+  function setStatus(msg, isError) {
+    statusBar.textContent = msg;
+    statusBar.classList.toggle("err", !!isError);
+  }
+
+  function updateRawMeta() {
+    const bytes = rawBytesOverride || new TextEncoder().encode(rawText.value);
+    rawMeta.textContent = formatBytes(bytes.length);
+  }
+
+  function updateEncMeta() {
+    encMeta.textContent = encText.value.length + " chars";
+  }
+
+  function getCodec() {
+    const codec = codecs[formatSelect.value];
+    if (!codec) throw new Error("This format isn't supported yet");
+    return codec;
+  }
+
+  // ---------- raw panel view mode (Text / Hex) ----------
+  // "Text" shows the editable textarea as before. "Hex" shows a read-only
+  // hex dump of the exact bytes — useful once the data can't be represented
+  // as text without loss (e.g. an image dropped in, or a Decode result that
+  // isn't valid text). The view can be switched manually at any time; it's
+  // also switched automatically whenever a drop or Decode brings in new data.
+  let rawView = "text";
+
+  // Tracks a drag-to-select range across the hex/ASCII columns, by absolute
+  // byte index rather than DOM position — see the selection handlers below.
+  let hexSelecting = false;
+  let hexSelStart = null;
+  let hexSelEnd = null;
+
+  function currentRawBytes() {
+    return rawBytesOverride || new TextEncoder().encode(rawText.value);
+  }
+
+  function looksLikeText(bytes) {
+    if (!bytes || bytes.length === 0) return true;
+    let text;
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch (e) {
+      return false; // not valid UTF-8 at all
+    }
+    // Control characters other than tab/newline/CR are a strong signal of
+    // binary data rather than genuine text.
+    return !/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(text);
+  }
+
+  function setRawView(view) {
+    rawView = view;
+    const isBinary = view === "binary";
+    rawText.hidden = isBinary;
+    hexView.hidden = !isBinary;
+    rawViewToggle.querySelectorAll(".view-toggle-btn").forEach((btn) => {
+      btn.classList.toggle("is-active", btn.dataset.view === view);
+    });
+    if (isBinary) renderHexView();
+  }
+
+  function autoSetRawView(bytes) {
+    setRawView(looksLikeText(bytes) ? "text" : "binary");
+  }
+
+  // Loading the whole file as hex-view DOM at once would freeze the tab for
+  // anything large, so instead we render HEX_CHUNK_BYTES worth of rows at a
+  // time — one chunk up front, then one more each time the user scrolls
+  // near the bottom (see the hexView "scroll" listener below) — until the
+  // whole file is shown. HEX_HARD_CAP_BYTES is just a safety ceiling for
+  // pathologically large drops (e.g. a multi-GB video dropped by mistake);
+  // ordinary files are never capped, since loading only ever advances a
+  // chunk at a time as the user actually scrolls into it.
+  const HEX_CHUNK_BYTES = 65536;
+  const HEX_HARD_CAP_BYTES = 8 * 1024 * 1024;
+
+  // State for the hex view currently on screen: the exact bytes being
+  // shown, how many of them have been turned into rows so far, and the
+  // (possibly capped) total we'll ever render for this data.
+  let hexRenderBytes = null;
+  let hexRenderedCount = 0;
+  let hexRenderLimit = 0;
+
+  function buildHexRows(bytes, start, end) {
+    const frag = document.createDocumentFragment();
+    for (let i = start; i < end; i += 16) {
+      const row = document.createElement("div");
+      row.className = "hex-row";
+
+      const offset = document.createElement("span");
+      offset.className = "hex-offset";
+      offset.dataset.rowStart = String(i);
+      offset.textContent = i.toString(16).padStart(6, "0").toUpperCase();
+
+      const hexSpan = document.createElement("span");
+      hexSpan.className = "hex-bytes";
+
+      const asciiSpan = document.createElement("span");
+      asciiSpan.className = "hex-ascii";
+
+      // Each real byte gets its own <span> in both the hex column and the
+      // ASCII column, sharing the same data-idx (the byte's absolute
+      // position in the data). That shared index is what lets a drag
+      // selection light up the matching byte in both columns at once —
+      // see the selection handlers below. Padding for a short last row is
+      // plain, non-indexed text so it can never be part of a selection.
+      for (let j = 0; j < 16; j++) {
+        const sep = j % 2 === 1 ? " " : "";
+        if (i + j < end) {
+          const idx = i + j;
+          const b = bytes[idx];
+
+          const byteEl = document.createElement("span");
+          byteEl.className = "hex-byte";
+          byteEl.dataset.idx = String(idx);
+          byteEl.textContent = b.toString(16).padStart(2, "0").toUpperCase() + sep;
+          hexSpan.appendChild(byteEl);
+
+          const charEl = document.createElement("span");
+          charEl.className = "hex-char";
+          charEl.dataset.idx = String(idx);
+          charEl.textContent = b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : ".";
+          asciiSpan.appendChild(charEl);
+        } else {
+          const blank = document.createElement("span");
+          blank.className = "hex-blank";
+          blank.textContent = "  " + sep;
+          hexSpan.appendChild(blank);
+        }
+      }
+
+      row.appendChild(offset);
+      row.appendChild(hexSpan);
+      row.appendChild(asciiSpan);
+      frag.appendChild(row);
+    }
+    return frag;
+  }
+
+  // Appends the next HEX_CHUNK_BYTES worth of rows (if any remain) just
+  // before the trailing note, so the note always stays at the bottom.
+  function appendHexChunk() {
+    if (hexRenderBytes === null || hexRenderedCount >= hexRenderLimit) return;
+    const start = hexRenderedCount;
+    const end = Math.min(start + HEX_CHUNK_BYTES, hexRenderLimit);
+    hexView.insertBefore(buildHexRows(hexRenderBytes, start, end), hexView.querySelector(".hex-note"));
+    hexRenderedCount = end;
+
+    if (hexRenderedCount >= hexRenderLimit && hexRenderLimit < hexRenderBytes.length) {
+      const note = document.createElement("div");
+      note.className = "hex-note";
+      note.textContent = `Showing the first ${formatBytes(HEX_HARD_CAP_BYTES)} of ${formatBytes(hexRenderBytes.length)} — use Download to get the rest.`;
+      hexView.appendChild(note);
+    }
+  }
+
+  // Loads more rows once the user has scrolled within one viewport's height
+  // of the bottom of what's rendered so far.
+  hexView.addEventListener("scroll", () => {
+    if (hexView.scrollTop + hexView.clientHeight >= hexView.scrollHeight - hexView.clientHeight) {
+      appendHexChunk();
+    }
+  });
+
+  function renderHexView() {
+    const bytes = currentRawBytes();
+    hexView.textContent = "";
+    hexView.scrollTop = 0;
+    // A fresh render means any previous highlight no longer refers to
+    // anything meaningful (indices may not even exist anymore).
+    hexSelStart = null;
+    hexSelEnd = null;
+    hexRenderBytes = null;
+    hexRenderedCount = 0;
+    hexRenderLimit = 0;
+    if (bytes.length === 0) {
+      const empty = document.createElement("span");
+      empty.className = "hex-empty";
+      empty.textContent = "No data.";
+      hexView.appendChild(empty);
+      return;
+    }
+
+    // Column header row: blank offset cell (for alignment only), the 16
+    // column indices (00-0F) formatted with the same grouping as the data
+    // rows, and the matching hex-digit legend for the ASCII column. Each
+    // column gets its own span (data-col) built with the exact same
+    // "digits + separator" pattern as a data row's byte spans, so the two
+    // rows line up pixel-for-pixel — and so a selected byte's column can be
+    // highlighted here too.
+    const headerRow = document.createElement("div");
+    headerRow.className = "hex-row hex-header-row";
+
+    const headerOffset = document.createElement("span");
+    headerOffset.className = "hex-offset";
+
+    const headerHex = document.createElement("span");
+    headerHex.className = "hex-bytes";
+
+    const headerAscii = document.createElement("span");
+    headerAscii.className = "hex-ascii";
+
+    const ASCII_LEGEND = "0123456789ABCDEF";
+    for (let j = 0; j < 16; j++) {
+      const sep = j % 2 === 1 ? " " : "";
+
+      const colHex = document.createElement("span");
+      colHex.className = "hex-byte hex-col-header";
+      colHex.dataset.col = String(j);
+      colHex.textContent = j.toString(16).padStart(2, "0").toUpperCase() + sep;
+      headerHex.appendChild(colHex);
+
+      const colAscii = document.createElement("span");
+      colAscii.className = "hex-char hex-col-header";
+      colAscii.dataset.col = String(j);
+      colAscii.textContent = ASCII_LEGEND[j];
+      headerAscii.appendChild(colAscii);
+    }
+
+    headerRow.appendChild(headerOffset);
+    headerRow.appendChild(headerHex);
+    headerRow.appendChild(headerAscii);
+    hexView.appendChild(headerRow);
+
+    hexRenderBytes = bytes;
+    hexRenderLimit = Math.min(bytes.length, HEX_HARD_CAP_BYTES);
+    appendHexChunk();
+  }
+
+  rawViewToggle.addEventListener("click", (e) => {
+    const btn = e.target.closest(".view-toggle-btn");
+    if (!btn) return;
+    setRawView(btn.dataset.view);
+  });
+
+  // ---------- hex/ASCII selection sync ----------
+  // Native text selection can't keep the hex column and ASCII column
+  // pointing at the same bytes (they're separate runs of text), so instead
+  // we track the drag ourselves by absolute byte index and apply a custom
+  // highlight to every span — hex and ASCII alike — that shares that index.
+  // Native selection is switched off for the whole view (see .hex-view
+  // user-select: none in the stylesheet), which is also what keeps the
+  // header row and the address column from ever being selectable: they're
+  // plain text with no data-idx, so this logic never touches them.
+  function hexIdxFromTarget(target) {
+    const el = target && target.closest && target.closest(".hex-byte, .hex-char");
+    if (!el || !hexView.contains(el)) return null;
+    const idx = Number(el.dataset.idx);
+    return Number.isNaN(idx) ? null : idx;
+  }
+
+  function applyHexSelection() {
+    hexView.querySelectorAll(".hex-selected").forEach((el) => el.classList.remove("hex-selected"));
+    hexView.querySelectorAll(".hex-active").forEach((el) => el.classList.remove("hex-active"));
+    if (hexSelStart === null || hexSelEnd === null) return;
+    const lo = Math.min(hexSelStart, hexSelEnd);
+    const hi = Math.max(hexSelStart, hexSelEnd);
+
+    // Which columns (0-15) and which row-start offsets the selection
+    // touches, so the matching header cell and address cell can be
+    // highlighted alongside the bytes themselves.
+    const cols = new Set();
+    const rowStarts = new Set();
+
+    hexView.querySelectorAll(".hex-byte, .hex-char").forEach((el) => {
+      const idx = Number(el.dataset.idx);
+      if (idx >= lo && idx <= hi) {
+        el.classList.add("hex-selected");
+        cols.add(idx % 16);
+        rowStarts.add(idx - (idx % 16));
+      }
+    });
+
+    hexView.querySelectorAll(".hex-col-header").forEach((el) => {
+      if (cols.has(Number(el.dataset.col))) el.classList.add("hex-active");
+    });
+    hexView.querySelectorAll(".hex-offset[data-row-start]").forEach((el) => {
+      if (rowStarts.has(Number(el.dataset.rowStart))) el.classList.add("hex-active");
+    });
+  }
+
+  hexView.addEventListener("mousedown", (e) => {
+    const idx = hexIdxFromTarget(e.target);
+    if (idx === null) return;
+    e.preventDefault();
+    hexSelecting = true;
+    hexSelStart = idx;
+    hexSelEnd = idx;
+    applyHexSelection();
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!hexSelecting) return;
+    const idx = hexIdxFromTarget(e.target);
+    if (idx === null) return;
+    hexSelEnd = idx;
+    applyHexSelection();
+  });
+
+  window.addEventListener("mouseup", () => {
+    hexSelecting = false;
+  });
+
+  // Clicking anywhere outside a byte/char span (including the header row
+  // and address column) clears the highlight.
+  document.addEventListener("mousedown", (e) => {
+    if (hexIdxFromTarget(e.target) !== null) return;
+    if (hexSelStart === null && hexSelEnd === null) return;
+    hexSelStart = null;
+    hexSelEnd = null;
+    applyHexSelection();
+  });
+
+  // ---------- drag & drop (reads dropped file as text) ----------
+  // A counter (rather than checking e.target) correctly handles the dropzone's
+  // child textarea: dragenter/dragleave fire once per element boundary crossed,
+  // so entering/leaving the child would otherwise wrongly toggle the highlight.
+  let dragCounter = 0;
+  // Holds the exact bytes currently represented by the raw panel — either
+  // from a dropped file or from a Decode result — so Encode and Download
+  // can use the real original data instead of a lossy text round trip.
+  // Cleared as soon as the raw textarea is edited directly, so those
+  // actions then fall back to encoding/downloading whatever text is shown.
+  let rawBytesOverride = null;
+
+  dropZone.addEventListener("dragenter", (e) => {
+    e.preventDefault();
+    dragCounter++;
+    dropZone.classList.add("dragover");
+  });
+  dropZone.addEventListener("dragover", (e) => {
+    e.preventDefault(); // required to allow dropping
+  });
+  dropZone.addEventListener("dragleave", () => {
+    dragCounter = Math.max(0, dragCounter - 1);
+    if (dragCounter === 0) {
+      dropZone.classList.remove("dragover");
+    }
+  });
+  dropZone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dragCounter = 0;
+    dropZone.classList.remove("dragover");
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const bytes = new Uint8Array(reader.result);
+      rawBytesOverride = bytes;
+      // Text preview only — Encode/Download use rawBytesOverride directly,
+      // so this is just for display and doesn't affect the actual data.
+      rawText.value = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+      updateRawMeta();
+      autoSetRawView(bytes);
+      setStatus(`Loaded "${file.name}" (${formatBytes(file.size)}). Press Encode.`);
+    };
+    reader.onerror = () => setStatus("Couldn't read that file.", true);
+    reader.readAsArrayBuffer(file);
+  });
+  // Safety net: if the drag is cancelled (e.g. dropped outside the window,
+  // or the user presses Escape), make sure the highlight always clears.
+  window.addEventListener("dragend", () => {
+    dragCounter = 0;
+    dropZone.classList.remove("dragover");
+  });
+
+  rawText.addEventListener("input", () => {
+    rawBytesOverride = null;
+    updateRawMeta();
+  });
+  encText.addEventListener("input", updateEncMeta);
+
+  // ---------- encode / decode ----------
+  encodeBtn.addEventListener("click", () => {
+    try {
+      const codec = getCodec();
+      const bytes = rawBytesOverride || new TextEncoder().encode(rawText.value);
+      if (bytes.length === 0) {
+        setStatus("There's nothing on the left to encode.", true);
+        return;
+      }
+      const encoded = codec.encode(bytes);
+      encText.value = encoded;
+      updateEncMeta();
+      setStatus(`Encoded ${formatBytes(bytes.length)} into ${encoded.length} characters (${formatSelect.options[formatSelect.selectedIndex].text}).`);
+    } catch (err) {
+      setStatus("Encode failed: " + err.message, true);
+    }
+  });
+
+  decodeBtn.addEventListener("click", () => {
+    try {
+      const codec = getCodec();
+      if (encText.value.trim() === "") {
+        setStatus("There's nothing on the right to decode.", true);
+        return;
+      }
+      const bytes = codec.decode(encText.value);
+      const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+      rawBytesOverride = bytes;
+      // rawText only holds a text preview of the decoded bytes — Download
+      // and a later Encode use rawBytesOverride directly, so this preview
+      // can be lossy (e.g. for binary data) without affecting the real data.
+      rawText.value = text;
+      updateRawMeta();
+      autoSetRawView(bytes);
+      setStatus(`Decoded ${formatBytes(bytes.length)} back into text on the left.`);
+    } catch (err) {
+      setStatus("Decode failed: " + err.message, true);
+    }
+  });
+
+  // ---------- copy buttons ----------
+  const CHECK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+
+  function wireCopy(btn, getValue) {
+    const original = btn.innerHTML;
+    const originalTitle = btn.title;
+    btn.addEventListener("click", async () => {
+      const value = getValue();
+      if (!value) return;
+      try {
+        await navigator.clipboard.writeText(value);
+        btn.innerHTML = CHECK_ICON;
+        btn.title = "Copied";
+        btn.classList.add("copied");
+        setTimeout(() => {
+          btn.innerHTML = original;
+          btn.title = originalTitle;
+          btn.classList.remove("copied");
+        }, 1200);
+      } catch (e) {
+        setStatus("Couldn't copy automatically — please select and copy the text manually.", true);
+      }
+    });
+  }
+  wireCopy(copyRaw, () => rawText.value);
+  wireCopy(copyEnc, () => encText.value);
+
+  // ---------- download buttons ----------
+  function downloadText(filename, content) {
+    const type = content instanceof Uint8Array ? "application/octet-stream" : "text/plain;charset=utf-8";
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  downloadRaw.addEventListener("click", () => {
+    const value = rawBytesOverride || rawText.value;
+    if (!value || value.length === 0) return;
+    downloadText("raw-data.txt", value);
+  });
+
+  downloadEnc.addEventListener("click", () => {
+    const value = encText.value;
+    if (!value) return;
+    downloadText(`encoded-${formatSelect.value}.txt`, value);
+  });
+
+  // ---------- draggable splitter ----------
+  let dragging = false;
+  let dragStartPos = 0;  // pointer coordinate (X or Y) at the moment dragging began
+  let dragStartSize = 0; // raw panel's size (width or height) at that same moment
+  let splitRatio = null; // fraction (0-1) of the available space the raw panel occupies; null = default 50/50
+  let splitMql = null;
+  try {
+    if (typeof window.matchMedia === "function") {
+      splitMql = window.matchMedia("(max-width: 760px)");
+    }
+  } catch (e) {
+    splitMql = null;
+  }
+
+  function isStacked() {
+    return splitMql ? splitMql.matches : false;
+  }
+
+  function resetSplitRatio() {
+    splitRatio = null;
+    rawPanel.style.flex = "1 1 0%";
+    encPanel.style.flex = "1 1 0%";
+  }
+
+  // Whenever the layout flips between side-by-side and stacked, drop any
+  // dragged split ratio back to an even 50/50 so leftover pixel sizing
+  // from the previous orientation can't push the page into a scrollbar.
+  if (splitMql) {
+    if (splitMql.addEventListener) {
+      splitMql.addEventListener("change", resetSplitRatio);
+    } else if (splitMql.addListener) {
+      splitMql.addListener(resetSplitRatio);
+    }
+  }
+
+  function onPointerDown(e) {
+    dragging = true;
+    controls.classList.add("dragging");
+    document.body.style.cursor = isStacked() ? "row-resize" : "col-resize";
+    // Record where the drag started and how big the raw panel already is,
+    // so the first pointermove applies a *delta* from this point rather than
+    // snapping the boundary to the pointer's absolute position (which caused
+    // a visible jump as soon as dragging started, even with no real mouse
+    // movement, whenever the initial press wasn't pixel-perfectly centered
+    // on the handle).
+    const rawRect = rawPanel.getBoundingClientRect();
+    dragStartPos = isStacked() ? e.clientY : e.clientX;
+    dragStartSize = isStacked() ? rawRect.height : rawRect.width;
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+  }
+
+  function onPointerMove(e) {
+    if (!dragging) return;
+    const workbenchRect = workbench.getBoundingClientRect();
+    const minSize = 160;
+    if (isStacked()) {
+      const controlsSize = controls.offsetHeight;
+      const available = workbenchRect.height - controlsSize;
+      const maxSize = available - minSize;
+      let newSize = dragStartSize + (e.clientY - dragStartPos);
+      newSize = Math.max(minSize, Math.min(maxSize, newSize));
+      splitRatio = available > 0 ? newSize / available : 0.5;
+      rawPanel.style.flex = `0 0 ${newSize}px`;
+      encPanel.style.flex = "1 1 0%";
+    } else {
+      const controlsSize = controls.offsetWidth;
+      const available = workbenchRect.width - controlsSize;
+      const maxSize = available - minSize;
+      let newSize = dragStartSize + (e.clientX - dragStartPos);
+      newSize = Math.max(minSize, Math.min(maxSize, newSize));
+      splitRatio = available > 0 ? newSize / available : 0.5;
+      rawPanel.style.flex = `0 0 ${newSize}px`;
+      encPanel.style.flex = "1 1 0%";
+    }
+  }
+
+  function onPointerUp() {
+    dragging = false;
+    controls.classList.remove("dragging");
+    document.body.style.cursor = "";
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", onPointerUp);
+  }
+
+  // Keep the dragged ratio intact while the window is resized (as long as we
+  // haven't crossed the stacked/side-by-side breakpoint, which resets it above).
+  let resizeScheduled = false;
+  function reapplySplitRatio() {
+    if (splitRatio === null || dragging) return;
+    const workbenchRect = workbench.getBoundingClientRect();
+    const minSize = 160;
+    const controlsSize = isStacked() ? controls.offsetHeight : controls.offsetWidth;
+    const available = (isStacked() ? workbenchRect.height : workbenchRect.width) - controlsSize;
+    const maxSize = available - minSize;
+    let newSize = available * splitRatio;
+    newSize = Math.max(minSize, Math.min(maxSize, newSize));
+    rawPanel.style.flex = `0 0 ${newSize}px`;
+    encPanel.style.flex = "1 1 0%";
+  }
+  window.addEventListener("resize", () => {
+    if (resizeScheduled) return;
+    resizeScheduled = true;
+    requestAnimationFrame(() => {
+      resizeScheduled = false;
+      reapplySplitRatio();
+    });
+  });
+
+  const splitterHandle = document.getElementById("splitterHandle");
+  splitterHandle.addEventListener("pointerdown", onPointerDown);
+  splitterHandle.addEventListener("dblclick", resetSplitRatio);
+
+  // ---------- init ----------
+  updateRawMeta();
+  updateEncMeta();
+})();
+</script>
+</body>
+</html>
