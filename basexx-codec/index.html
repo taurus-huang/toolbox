@@ -315,8 +315,21 @@
   }
 
   .hex-header-row {
-    padding-bottom: 6px;
-    margin-bottom: 6px;
+    position: sticky;
+    /* .hex-view has a 14px top padding, and sticky offsets are resolved
+       against the scrollport's padding box — so a plain `top: 0` only
+       pins this row just below that padding, leaving a 14px sliver at the
+       very top of the scrollport uncovered, through which scrolled rows
+       peek. Pulling the row up by that same 14px (negative top + matching
+       negative top margin) and padding it back down by 14px keeps the
+       visible header text in the same place while extending the row's
+       background all the way to the true top of the view, fully hiding
+       whatever has scrolled behind it. */
+    top: -14px;
+    z-index: 2;
+    margin: -14px -16px 6px;
+    padding: 14px 16px 6px;
+    background: var(--panel);
     border-bottom: 1px solid var(--border);
   }
 
@@ -325,11 +338,19 @@
     color: var(--text-faint);
   }
 
-  .hex-note {
-    margin-top: 10px;
-    font-family: var(--sans);
-    font-size: 11.5px;
-    color: var(--text-faint);
+  /* Virtual scrolling: .hex-sizer is an empty element sized to the height
+     the full data *would* take up if every row were really in the DOM —
+     this is what gives the native scrollbar the correct range/proportions.
+     .hex-rows-layer is absolutely positioned inside it and only ever holds
+     the handful of rows currently near the viewport; it's repositioned
+     (via inline `top`) every time the visible window changes. */
+  .hex-sizer {
+    position: relative;
+  }
+  .hex-rows-layer {
+    position: absolute;
+    left: 0;
+    right: 0;
   }
   .hex-empty {
     color: var(--text-faint);
@@ -966,23 +987,34 @@
     setRawView(looksLikeText(bytes) ? "text" : "hex");
   }
 
-  // Loading the whole file as hex-view DOM at once would freeze the tab for
-  // anything large, so instead we render HEX_CHUNK_BYTES worth of rows at a
-  // time — one chunk up front, then one more each time the user scrolls
-  // near the bottom (see the hexView "scroll" listener below) — until the
-  // whole file is shown. HEX_HARD_CAP_BYTES is just a safety ceiling for
-  // pathologically large drops (e.g. a multi-GB video dropped by mistake);
-  // ordinary files are never capped, since loading only ever advances a
-  // chunk at a time as the user actually scrolls into it.
-  const HEX_CHUNK_BYTES = 65536;
-  const HEX_HARD_CAP_BYTES = 8 * 1024 * 1024;
+  // Rendering every row's DOM node for a large file would freeze (or crash)
+  // the tab, so instead we use virtual scrolling, the same technique tools
+  // like hexed.it use: only the rows actually near the viewport — visible
+  // rows plus a small buffer above/below — ever exist in the DOM. A tall,
+  // empty "sizer" element gives the native scrollbar the correct
+  // proportions, and the rendered rows are absolutely positioned inside it
+  // and swapped out on every scroll. This means the full file is always
+  // "loaded" (in memory as bytes) and reachable by scrolling, with no cap.
+  const HEX_ROW_BYTES = 16;
+  const HEX_BUFFER_ROWS = 12; // extra rows kept rendered above/below the viewport
 
-  // State for the hex view currently on screen: the exact bytes being
-  // shown, how many of them have been turned into rows so far, and the
-  // (possibly capped) total we'll ever render for this data.
-  let hexRenderBytes = null;
-  let hexRenderedCount = 0;
-  let hexRenderLimit = 0;
+  // Browsers cap how tall an element can be (well under what a multi-GB
+  // file would naturally need at ~20px/row). Past this height we switch the
+  // sizer to a fixed size and map scroll *position* proportionally to row
+  // index instead of using true 1:1 pixel coordinates — still a correct,
+  // smooth scrollbar, just no longer one where scrollTop equals a byte
+  // offset in pixels.
+  const HEX_MAX_SIZER_HEIGHT = 6000000;
+
+  // State for the hex view currently on screen.
+  let hexBytesData = null;   // the exact bytes being shown
+  let hexTotalRows = 0;      // total rows the data needs at 16 bytes/row
+  let hexRowHeight = 0;      // measured pixel height of a single row
+  let hexRenderedStart = -1; // first row index currently in the DOM
+  let hexRenderedEnd = -1;   // one past the last row index currently in the DOM
+  let hexViewportRaf = null; // requestAnimationFrame handle, for scroll throttling
+  let hexSizer = null;
+  let hexRowsLayer = null;
 
   function buildHexRows(bytes, start, end) {
     const frag = document.createDocumentFragment();
@@ -1040,30 +1072,79 @@
     return frag;
   }
 
-  // Appends the next HEX_CHUNK_BYTES worth of rows (if any remain) just
-  // before the trailing note, so the note always stays at the bottom.
-  function appendHexChunk() {
-    if (hexRenderBytes === null || hexRenderedCount >= hexRenderLimit) return;
-    const start = hexRenderedCount;
-    const end = Math.min(start + HEX_CHUNK_BYTES, hexRenderLimit);
-    hexView.insertBefore(buildHexRows(hexRenderBytes, start, end), hexView.querySelector(".hex-note"));
-    hexRenderedCount = end;
-
-    if (hexRenderedCount >= hexRenderLimit && hexRenderLimit < hexRenderBytes.length) {
-      const note = document.createElement("div");
-      note.className = "hex-note";
-      note.textContent = `Showing the first ${formatBytes(HEX_HARD_CAP_BYTES)} of ${formatBytes(hexRenderBytes.length)} — use Download to get the rest.`;
-      hexView.appendChild(note);
-    }
+  // Renders one throwaway row off-screen just to measure the real pixel
+  // height a row takes up (depends on current font/theme metrics), so the
+  // row-index <-> pixel-offset math below has an accurate unit to work with.
+  function measureHexRowHeight() {
+    const probe = buildHexRows(new Uint8Array(HEX_ROW_BYTES), 0, HEX_ROW_BYTES);
+    const row = probe.firstChild;
+    row.style.visibility = "hidden";
+    hexView.appendChild(row);
+    const h = row.getBoundingClientRect().height;
+    row.remove();
+    return h || 20;
   }
 
-  // Loads more rows once the user has scrolled within one viewport's height
-  // of the bottom of what's rendered so far.
-  hexView.addEventListener("scroll", () => {
-    if (hexView.scrollTop + hexView.clientHeight >= hexView.scrollHeight - hexView.clientHeight) {
-      appendHexChunk();
-    }
-  });
+  // The core of virtual scrolling: given the current scroll position, work
+  // out which slice of rows should be visible (plus a small buffer) and
+  // swap the DOM to hold exactly that slice, positioned so it lines up
+  // under the real scrollbar position. Byte-index-based selection state
+  // (hexSelStart/hexSelEnd) is untouched by any of this, so a selection
+  // made before scrolling re-highlights correctly once its rows re-enter
+  // the rendered window.
+  function updateHexViewport() {
+    if (!hexBytesData || hexRowHeight <= 0) return;
+
+    const viewportHeight = hexView.clientHeight || 1;
+    const scrollTop = hexView.scrollTop;
+    const visibleRows = Math.ceil(viewportHeight / hexRowHeight) + 1;
+    const maxStartRow = Math.max(0, hexTotalRows - visibleRows);
+
+    // Map the scrollbar position to a row index. For ordinary files this is
+    // just scrollTop / hexRowHeight; for files tall enough to hit
+    // HEX_MAX_SIZER_HEIGHT it's a proportional mapping instead (see the
+    // constant's comment above).
+    const naturalHeight = hexTotalRows * hexRowHeight;
+    const sizerHeight = Math.min(naturalHeight, HEX_MAX_SIZER_HEIGHT);
+    const maxScrollTop = Math.max(0, sizerHeight - viewportHeight);
+    const scrollFraction = maxScrollTop > 0 ? Math.min(1, scrollTop / maxScrollTop) : 0;
+    const idealStartRow = Math.round(scrollFraction * maxStartRow);
+
+    const startRow = Math.max(0, idealStartRow - HEX_BUFFER_ROWS);
+    const endRow = Math.min(hexTotalRows, idealStartRow + visibleRows + HEX_BUFFER_ROWS);
+
+    if (startRow === hexRenderedStart && endRow === hexRenderedEnd) return;
+    hexRenderedStart = startRow;
+    hexRenderedEnd = endRow;
+
+    const startByte = startRow * HEX_ROW_BYTES;
+    const endByte = Math.min(hexBytesData.length, endRow * HEX_ROW_BYTES);
+    hexRowsLayer.textContent = "";
+    hexRowsLayer.appendChild(buildHexRows(hexBytesData, startByte, endByte));
+    // Position the rendered window directly under wherever scrollTop
+    // actually is right now, rather than at its "natural" row*rowHeight
+    // offset — that's what keeps this correct even when sizerHeight has
+    // been capped and no longer equals hexTotalRows * hexRowHeight.
+    hexRowsLayer.style.top = (scrollTop - (idealStartRow - startRow) * hexRowHeight) + "px";
+
+    applyHexSelection();
+  }
+
+  function scheduleHexViewportUpdate() {
+    if (hexViewportRaf !== null) return;
+    hexViewportRaf = requestAnimationFrame(() => {
+      hexViewportRaf = null;
+      updateHexViewport();
+    });
+  }
+
+  hexView.addEventListener("scroll", scheduleHexViewportUpdate);
+  // Re-render the visible window whenever the hex view's own size changes —
+  // e.g. the draggable splitter resizing the panel, or the window resizing —
+  // since that changes how many rows should be on screen.
+  if (typeof ResizeObserver === "function") {
+    new ResizeObserver(scheduleHexViewportUpdate).observe(hexView);
+  }
 
   function renderHexView() {
     const bytes = currentRawBytes();
@@ -1073,9 +1154,12 @@
     // anything meaningful (indices may not even exist anymore).
     hexSelStart = null;
     hexSelEnd = null;
-    hexRenderBytes = null;
-    hexRenderedCount = 0;
-    hexRenderLimit = 0;
+    hexBytesData = null;
+    hexTotalRows = 0;
+    hexRenderedStart = -1;
+    hexRenderedEnd = -1;
+    hexSizer = null;
+    hexRowsLayer = null;
     if (bytes.length === 0) {
       const empty = document.createElement("span");
       empty.className = "hex-empty";
@@ -1125,9 +1209,20 @@
     headerRow.appendChild(headerAscii);
     hexView.appendChild(headerRow);
 
-    hexRenderBytes = bytes;
-    hexRenderLimit = Math.min(bytes.length, HEX_HARD_CAP_BYTES);
-    appendHexChunk();
+    hexRowHeight = measureHexRowHeight();
+    hexTotalRows = Math.ceil(bytes.length / HEX_ROW_BYTES);
+
+    hexSizer = document.createElement("div");
+    hexSizer.className = "hex-sizer";
+    hexSizer.style.height = Math.min(hexTotalRows * hexRowHeight, HEX_MAX_SIZER_HEIGHT) + "px";
+
+    hexRowsLayer = document.createElement("div");
+    hexRowsLayer.className = "hex-rows-layer";
+    hexSizer.appendChild(hexRowsLayer);
+    hexView.appendChild(hexSizer);
+
+    hexBytesData = bytes;
+    updateHexViewport();
   }
 
   rawViewToggle.addEventListener("click", (e) => {
