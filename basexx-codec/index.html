@@ -6,7 +6,7 @@
 <title>BaseXX Codec</title>
 <meta name="tool-name" content="BaseXX Codec">
 <meta name="tool-version" content="">
-<meta name="tool-desc" content="Supports Base16, Base64, Base85, Base91 encode/decode.">
+<meta name="tool-desc" content="Supports Base16, Base32, Base64, Base85, Base91 encode/decode.">
 <meta name="tool-desc" content="Supports drag-and-drop file.">
 <meta name="tool-desc" content="Entirely local processing, no data uploaded.">
 <style>
@@ -520,6 +520,7 @@
       <label for="formatSelect">Format</label>
       <select id="formatSelect">
         <option value="base16">Base16 (Hex)</option>
+        <option value="base32">Base32</option>
         <option value="base64" selected>Base64</option>
         <option value="base85">Base85</option>
         <option value="base91">Base91</option>
@@ -629,6 +630,56 @@
   // ---------- codecs ----------
   // Each codec: { encode(Uint8Array) -> string, decode(string) -> Uint8Array }
   // Add new formats here (e.g. base85, base91) and enable their <option> above.
+
+  // --- Base32 (RFC 4648) ---
+  const B32_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const B32_LOOKUP = (() => {
+    const t = new Uint8Array(256).fill(255);
+    for (let i = 0; i < B32_CHARS.length; i++) t[B32_CHARS.charCodeAt(i)] = i;
+    return t;
+  })();
+
+  function base32Encode(bytes) {
+    let out = "";
+    let bitBuffer = 0;
+    let bitCount = 0;
+    for (let i = 0; i < bytes.length; i++) {
+      bitBuffer = (bitBuffer << 8) | bytes[i];
+      bitCount += 8;
+      while (bitCount >= 5) {
+        bitCount -= 5;
+        out += B32_CHARS[(bitBuffer >> bitCount) & 0x1f];
+      }
+    }
+    if (bitCount > 0) {
+      out += B32_CHARS[(bitBuffer << (5 - bitCount)) & 0x1f];
+    }
+    while (out.length % 8 !== 0) {
+      out += "=";
+    }
+    return out;
+  }
+
+  function base32Decode(str) {
+    const clean = str.replace(/\s+/g, "").replace(/=+$/, "").toUpperCase();
+    if (!/^[A-Z2-7]*$/.test(clean)) {
+      throw new Error("Contains characters outside the Base32 alphabet");
+    }
+    const bytesOut = [];
+    let bitBuffer = 0;
+    let bitCount = 0;
+    for (let i = 0; i < clean.length; i++) {
+      const val = B32_LOOKUP[clean.charCodeAt(i)];
+      bitBuffer = (bitBuffer << 5) | val;
+      bitCount += 5;
+      if (bitCount >= 8) {
+        bitCount -= 8;
+        bytesOut.push((bitBuffer >> bitCount) & 0xff);
+      }
+    }
+    return new Uint8Array(bytesOut);
+  }
+
   const B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   const B64_LOOKUP = (() => {
     const t = new Uint8Array(256).fill(255);
@@ -815,6 +866,7 @@
 
   const codecs = {
     base16: { encode: base16Encode, decode: base16Decode },
+    base32: { encode: base32Encode, decode: base32Decode },
     base64: { encode: base64Encode, decode: base64Decode },
     base85: { encode: base85Encode, decode: base85Decode },
     base91: { encode: base91Encode, decode: base91Decode },
