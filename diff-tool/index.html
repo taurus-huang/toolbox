@@ -2898,6 +2898,40 @@ function replaceCrossLineSelection(insertText){
   return true;
 }
 
+/* Merge line lineIdx with the following line (lineIdx+1) in the given
+   column, dropping the newline between them -- this is what actually
+   makes Delete-at-end-of-line / Backspace-at-start-of-line do something,
+   since (as explained above) there's otherwise nothing on the other side
+   of the per-line contenteditable boundary for those keys to reach
+   across. Reads every line's LIVE (possibly not-yet-committed) text
+   straight from the DOM, same approach as
+   replaceCrossLineSelection/commitColumnEdits, so an in-progress edit on
+   either line isn't lost. The caret ends up at the junction point, i.e.
+   the end of line lineIdx's original text, so typing continues exactly
+   where the deleted newline used to be. */
+function mergeLinesInColumn(col, lineIdx){
+  const container = document.getElementById('lines-' + col);
+  if(!container) return;
+
+  const lineEls = container.querySelectorAll('.line:not(.empty) .content[contenteditable="true"]');
+  const liveLines = [];
+  lineEls.forEach(elx=>{ liveLines[+elx.dataset.lineIdx] = elx.textContent.replace(/\r/g, ''); });
+
+  if(lineIdx < 0 || lineIdx+1 >= liveLines.length) return;
+
+  const joinOffset = (liveLines[lineIdx] || '').length;
+  liveLines.splice(lineIdx, 2, (liveLines[lineIdx] || '') + (liveLines[lineIdx+1] || ''));
+
+  // A pending debounced commit from ordinary typing is now superseded by
+  // this (which already reads the live, up-to-the-moment text) -- cancel
+  // it so it doesn't redundantly re-fire and re-render afterward.
+  if(editDebounce){ clearTimeout(editDebounce); editDebounce = null; }
+
+  pushHistory(col);
+  state.cols[col].text = liveLines.join('\n');
+  recompute({keepView:true, restoreCaret:{col, lineIdx, offset:joinOffset}});
+}
+
 document.getElementById('editor-wrap').addEventListener('keydown', (e)=>{
   if(e.key !== 'Delete' && e.key !== 'Backspace') return;
   if(e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return; // leave modified combos (e.g. word-delete) to default handling
