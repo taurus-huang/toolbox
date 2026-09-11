@@ -273,6 +273,11 @@
 
   .hex-view[hidden] { display: none; }
 
+  .hex-view:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--border-strong);
+  }
+
   .hex-row {
     display: flex;
     gap: 16px;
@@ -577,7 +582,7 @@
     </div>
     <div class="field" id="dropZone">
       <textarea id="rawText" placeholder="Type or paste text here, or drop a file"></textarea>
-      <div class="hex-view" id="hexView" hidden></div>
+      <div class="hex-view" id="hexView" tabindex="0" hidden></div>
     </div>
   </section>
 
@@ -942,11 +947,14 @@
   }
 
   // ---------- raw panel view mode (Text / Hex) ----------
-  // "Text" shows the editable textarea as before. "Hex" shows a read-only
+  // "Text" shows the editable textarea as before. "Hex" shows an editable
   // hex dump of the exact bytes — useful once the data can't be represented
   // as text without loss (e.g. an image dropped in, or a Decode result that
-  // isn't valid text). The view can be switched manually at any time; it's
-  // also switched automatically whenever a drop or Decode brings in new data.
+  // isn't valid text). Editing a byte there (see the selection/editing
+  // section further down) writes straight into the underlying bytes, same
+  // as a drop or Decode does. The view can be switched manually at any
+  // time; it's also switched automatically whenever a drop or Decode
+  // brings in new data.
   let rawView = "text";
 
   // Tracks a drag-to-select range across the hex/ASCII columns, by absolute
@@ -954,6 +962,14 @@
   let hexSelecting = false;
   let hexSelStart = null;
   let hexSelEnd = null;
+
+  // Editing state. A single-byte selection (hexSelStart === hexSelEnd) also
+  // doubles as the edit cursor — hexCursorCol says which column's keystrokes
+  // apply to it ("hex": two hex digits overwrite the byte; "ascii": one
+  // character overwrites it directly), and hexCursorNibble (hex column
+  // only) says whether the next hex digit fills the high or low nibble.
+  let hexCursorCol = "hex";
+  let hexCursorNibble = 0;
 
   function currentRawBytes() {
     return rawBytesOverride || new TextEncoder().encode(rawText.value);
@@ -1154,6 +1170,8 @@
     // anything meaningful (indices may not even exist anymore).
     hexSelStart = null;
     hexSelEnd = null;
+    hexCursorCol = "hex";
+    hexCursorNibble = 0;
     hexBytesData = null;
     hexTotalRows = 0;
     hexRenderedStart = -1;
@@ -1231,7 +1249,7 @@
     setRawView(btn.dataset.view);
   });
 
-  // ---------- hex/ASCII selection sync ----------
+  // ---------- hex/ASCII selection + editing ----------
   // Native text selection can't keep the hex column and ASCII column
   // pointing at the same bytes (they're separate runs of text), so instead
   // we track the drag ourselves by absolute byte index and apply a custom
@@ -1240,31 +1258,31 @@
   // user-select: none in the stylesheet), which is also what keeps the
   // header row and the address column from ever being selectable: they're
   // plain text with no data-idx, so this logic never touches them.
-  function hexIdxFromTarget(target) {
-    const el = target && target.closest && target.closest(".hex-byte, .hex-char");
-    if (!el || !hexView.contains(el)) return null;
-    const idx = Number(el.dataset.idx);
-    return Number.isNaN(idx) ? null : idx;
-  }
-
-  // Like hexIdxFromTarget, but tolerant of a point that lands in the blank
-  // strip the flex `gap` leaves between the offset / hex / ASCII columns.
-  // That strip belongs to no span — it hit-tests as the row itself — so a
-  // drag that starts or passes through it would otherwise find no idx at
-  // all. Snap those points to the nearest byte/char in the same row. The
-  // offset (address) column stays deliberately unselectable, so a point
-  // over it (or outside any row) still yields null.
-  function hexIdxFromPoint(x, y) {
+  //
+  // A single-byte selection doubles as the edit cursor: typing hex digits
+  // or an ASCII character while exactly one byte is selected overwrites
+  // that byte in place (see handleHexKeydown below).
+  function hexSpanFromPoint(x, y) {
     const target = document.elementFromPoint(x, y);
-    const direct = hexIdxFromTarget(target);
-    if (direct !== null) return direct;
+    const direct = target && target.closest && target.closest(".hex-byte, .hex-char");
+    if (direct && hexView.contains(direct) && !Number.isNaN(Number(direct.dataset.idx))) {
+      return direct;
+    }
 
+    // A click can also land in the blank strip the flex `gap` leaves
+    // between the offset / hex / ASCII columns, which belongs to no span
+    // at all — the row itself is what gets hit. Snap that to the nearest
+    // selectable byte in the same row so a drag started (or passing
+    // through) one of those gaps doesn't silently fail to select. The
+    // offset column stays deliberately unselectable, so gaps next to it
+    // snap into the hex column, not onto the address.
     const row = target && target.closest && target.closest(".hex-row");
     if (!row || target.closest(".hex-offset")) return null;
 
     let best = null;
     let bestDist = Infinity;
     row.querySelectorAll(".hex-byte, .hex-char").forEach((el) => {
+      if (Number.isNaN(Number(el.dataset.idx))) return; // column-header cells
       const rect = el.getBoundingClientRect();
       const dist = x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0;
       if (dist < bestDist) {
@@ -1272,8 +1290,13 @@
         best = el;
       }
     });
-    if (!best) return null;
-    const idx = Number(best.dataset.idx);
+    return best;
+  }
+
+  function hexIdxFromPoint(x, y) {
+    const el = hexSpanFromPoint(x, y);
+    if (!el) return null;
+    const idx = Number(el.dataset.idx);
     return Number.isNaN(idx) ? null : idx;
   }
 
@@ -1307,13 +1330,153 @@
     });
   }
 
+  // Patches a single byte's rendered text in place (if it's currently in
+  // the virtualized DOM window) instead of re-rendering the whole viewport.
+  function updateHexByteDom(idx) {
+    const sep = (idx % 16) % 2 === 1 ? " " : "";
+    const value = hexBytesData[idx];
+    const byteEl = hexRowsLayer && hexRowsLayer.querySelector('.hex-byte[data-idx="' + idx + '"]');
+    if (byteEl) byteEl.textContent = value.toString(16).padStart(2, "0").toUpperCase() + sep;
+    const charEl = hexRowsLayer && hexRowsLayer.querySelector('.hex-char[data-idx="' + idx + '"]');
+    if (charEl) charEl.textContent = value >= 0x20 && value <= 0x7e ? String.fromCharCode(value) : ".";
+  }
+
+  // Writes one byte, patches the DOM, and keeps everything else that reads
+  // the raw data in sync — the same bookkeeping a drop or Decode does.
+  function commitHexByte(idx, value) {
+    hexBytesData[idx] = value & 0xff;
+    rawBytesOverride = hexBytesData;
+    updateHexByteDom(idx);
+    // Preview only, same caveat as elsewhere: Encode/Download read
+    // rawBytesOverride directly, so this can be lossy without consequence.
+    rawText.value = new TextDecoder("utf-8", { fatal: false }).decode(hexBytesData);
+    updateRawMeta();
+  }
+
+  // Moves the edit cursor (and the single-byte selection standing in for
+  // it) to newIdx, clamped to the data's bounds, and scrolls it into view
+  // if the virtualized window doesn't currently render it.
+  function moveHexCursor(newIdx, col) {
+    if (!hexBytesData || hexBytesData.length === 0) return;
+    newIdx = Math.max(0, Math.min(hexBytesData.length - 1, newIdx));
+    if (col) hexCursorCol = col;
+    hexCursorNibble = 0;
+    hexSelStart = newIdx;
+    hexSelEnd = newIdx;
+    scrollHexIdxIntoView(newIdx);
+    applyHexSelection();
+  }
+
+  function scrollHexIdxIntoView(idx) {
+    if (!hexBytesData || hexRowHeight <= 0) return;
+    const el = hexRowsLayer && hexRowsLayer.querySelector('[data-idx="' + idx + '"]');
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      const viewRect = hexView.getBoundingClientRect();
+      if (rect.top < viewRect.top) {
+        hexView.scrollTop -= (viewRect.top - rect.top) + hexRowHeight;
+      } else if (rect.bottom > viewRect.bottom) {
+        hexView.scrollTop += (rect.bottom - viewRect.bottom) + hexRowHeight;
+      }
+      return;
+    }
+    // idx isn't currently rendered at all (e.g. Home/End jumping far across
+    // a large file) — fall back to the same proportional row -> scrollTop
+    // mapping the virtualizer itself uses.
+    const row = Math.floor(idx / HEX_ROW_BYTES);
+    const viewportHeight = hexView.clientHeight || 1;
+    const visibleRows = Math.ceil(viewportHeight / hexRowHeight) + 1;
+    const maxStartRow = Math.max(0, hexTotalRows - visibleRows);
+    const naturalHeight = hexTotalRows * hexRowHeight;
+    const sizerHeight = Math.min(naturalHeight, HEX_MAX_SIZER_HEIGHT);
+    const maxScrollTop = Math.max(0, sizerHeight - viewportHeight);
+    const fraction = maxStartRow > 0 ? row / maxStartRow : 0;
+    hexView.scrollTop = fraction * maxScrollTop;
+  }
+
+  const HEX_NAV_KEYS = {
+    ArrowLeft: -1,
+    ArrowRight: 1,
+    ArrowUp: -HEX_ROW_BYTES,
+    ArrowDown: HEX_ROW_BYTES,
+  };
+
+  // Typing while exactly one byte is selected edits it: hex digits fill the
+  // hex column's high then low nibble (committing and advancing to the next
+  // byte after the second digit); any other single character in the ASCII
+  // column overwrites the whole byte and advances immediately. Arrow keys,
+  // Home/End, and Delete/Backspace move the cursor (Delete also clears the
+  // byte it leaves). Modified keystrokes (Ctrl/Cmd/Alt) are left alone so
+  // browser/OS shortcuts keep working.
+  function handleHexKeydown(e) {
+    if (!hexBytesData || hexBytesData.length === 0) return;
+    if (hexSelStart === null || hexSelEnd === null || hexSelStart !== hexSelEnd) return;
+    const idx = hexSelStart;
+
+    if (e.key in HEX_NAV_KEYS) {
+      e.preventDefault();
+      moveHexCursor(idx + HEX_NAV_KEYS[e.key]);
+      return;
+    }
+    if (e.key === "Home") {
+      e.preventDefault();
+      moveHexCursor(idx - (idx % HEX_ROW_BYTES));
+      return;
+    }
+    if (e.key === "End") {
+      e.preventDefault();
+      moveHexCursor(idx - (idx % HEX_ROW_BYTES) + HEX_ROW_BYTES - 1);
+      return;
+    }
+    if (e.key === "Delete") {
+      e.preventDefault();
+      commitHexByte(idx, 0);
+      moveHexCursor(idx + 1);
+      return;
+    }
+    if (e.key === "Backspace") {
+      e.preventDefault();
+      moveHexCursor(idx - 1);
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    if (hexCursorCol === "hex") {
+      if (!/^[0-9a-fA-F]$/.test(e.key)) return;
+      e.preventDefault();
+      const digit = parseInt(e.key, 16);
+      if (hexCursorNibble === 0) {
+        commitHexByte(idx, digit << 4);
+        hexCursorNibble = 1;
+      } else {
+        commitHexByte(idx, (hexBytesData[idx] & 0xf0) | digit);
+        moveHexCursor(idx + 1, "hex");
+      }
+    } else {
+      if (e.key.length !== 1) return;
+      const code = e.key.charCodeAt(0);
+      if (code > 0xff) {
+        setStatus("ASCII column only accepts single-byte (0–255) characters.", true);
+        return;
+      }
+      e.preventDefault();
+      commitHexByte(idx, code);
+      moveHexCursor(idx + 1, "ascii");
+    }
+  }
+
   hexView.addEventListener("mousedown", (e) => {
-    const idx = hexIdxFromPoint(e.clientX, e.clientY);
-    if (idx === null) return;
+    const el = hexSpanFromPoint(e.clientX, e.clientY);
+    if (!el) return;
+    const idx = Number(el.dataset.idx);
+    if (Number.isNaN(idx)) return;
     e.preventDefault();
+    hexView.focus();
     hexSelecting = true;
     hexSelStart = idx;
     hexSelEnd = idx;
+    hexCursorCol = el.classList.contains("hex-char") ? "ascii" : "hex";
+    hexCursorNibble = 0;
     applyHexSelection();
   });
 
@@ -1328,6 +1491,8 @@
   window.addEventListener("mouseup", () => {
     hexSelecting = false;
   });
+
+  hexView.addEventListener("keydown", handleHexKeydown);
 
   // Clicking anywhere outside a byte/char span (including the header row
   // and address column) clears the highlight.
