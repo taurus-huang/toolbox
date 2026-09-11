@@ -1247,6 +1247,36 @@
     return Number.isNaN(idx) ? null : idx;
   }
 
+  // Like hexIdxFromTarget, but tolerant of a point that lands in the blank
+  // strip the flex `gap` leaves between the offset / hex / ASCII columns.
+  // That strip belongs to no span — it hit-tests as the row itself — so a
+  // drag that starts or passes through it would otherwise find no idx at
+  // all. Snap those points to the nearest byte/char in the same row. The
+  // offset (address) column stays deliberately unselectable, so a point
+  // over it (or outside any row) still yields null.
+  function hexIdxFromPoint(x, y) {
+    const target = document.elementFromPoint(x, y);
+    const direct = hexIdxFromTarget(target);
+    if (direct !== null) return direct;
+
+    const row = target && target.closest && target.closest(".hex-row");
+    if (!row || target.closest(".hex-offset")) return null;
+
+    let best = null;
+    let bestDist = Infinity;
+    row.querySelectorAll(".hex-byte, .hex-char").forEach((el) => {
+      const rect = el.getBoundingClientRect();
+      const dist = x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = el;
+      }
+    });
+    if (!best) return null;
+    const idx = Number(best.dataset.idx);
+    return Number.isNaN(idx) ? null : idx;
+  }
+
   function applyHexSelection() {
     hexView.querySelectorAll(".hex-selected").forEach((el) => el.classList.remove("hex-selected"));
     hexView.querySelectorAll(".hex-active").forEach((el) => el.classList.remove("hex-active"));
@@ -1278,7 +1308,7 @@
   }
 
   hexView.addEventListener("mousedown", (e) => {
-    const idx = hexIdxFromTarget(e.target);
+    const idx = hexIdxFromPoint(e.clientX, e.clientY);
     if (idx === null) return;
     e.preventDefault();
     hexSelecting = true;
@@ -1289,7 +1319,7 @@
 
   window.addEventListener("mousemove", (e) => {
     if (!hexSelecting) return;
-    const idx = hexIdxFromTarget(e.target);
+    const idx = hexIdxFromPoint(e.clientX, e.clientY);
     if (idx === null) return;
     hexSelEnd = idx;
     applyHexSelection();
@@ -1302,7 +1332,7 @@
   // Clicking anywhere outside a byte/char span (including the header row
   // and address column) clears the highlight.
   document.addEventListener("mousedown", (e) => {
-    if (hexIdxFromTarget(e.target) !== null) return;
+    if (hexIdxFromPoint(e.clientX, e.clientY) !== null) return;
     if (hexSelStart === null && hexSelEnd === null) return;
     hexSelStart = null;
     hexSelEnd = null;
