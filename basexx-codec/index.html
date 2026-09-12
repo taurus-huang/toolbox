@@ -16,6 +16,7 @@
     --panel-2: #171b21;
     --border: #262b33;
     --border-strong: #3a414c;
+    --hex-group-divider: #404040;
     --text: #e7e4dd;
     --text-dim: #868c97;
     --text-faint: #565c66;
@@ -34,6 +35,7 @@
     --panel-2: #eef0f3;
     --border: #dde1e6;
     --border-strong: #c3c9d1;
+    --hex-group-divider: #c0c0c0;
     --text: #1a1d21;
     --text-dim: #5b6270;
     --text-faint: #98a0ab;
@@ -305,6 +307,29 @@
   .hex-char {
     cursor: default;
     border-radius: 2px;
+  }
+
+  /* A thin divider after every 4th byte in the hex column (data rows and
+     the column-index header alike), landing in the gap created by that
+     byte's trailing space so it doesn't crowd the digits on either side.
+     Drawn as a ::after rather than a plain border-right because a border
+     on an inline element only spans that element's own content-box height
+     (roughly the glyph height), not the row's full line-height — which
+     made it too short/faint to notice. Sizing in em units against the
+     row's line-height (1.7) instead guarantees a full-height line. */
+  .hex-byte.hex-group-end,
+  .hex-blank.hex-group-end {
+    position: relative;
+  }
+  .hex-byte.hex-group-end::after,
+  .hex-blank.hex-group-end::after {
+    content: "";
+    position: absolute;
+    top: -0.35em;
+    right: 0.25em;
+    width: 1px;
+    height: 1.7em;
+    background: var(--hex-group-divider);
   }
 
   .hex-selected {
@@ -1056,13 +1081,17 @@
       // see the selection handlers below. Padding for a short last row is
       // plain, non-indexed text so it can never be part of a selection.
       for (let j = 0; j < 16; j++) {
-        const sep = j % 2 === 1 ? " " : "";
+        // A gap after every byte now (not just every other one), plus a
+        // divider class on the 4th byte of each group — except the row's
+        // very last byte, which already borders the ASCII column.
+        const sep = " ";
+        const groupEnd = j % 4 === 3 && j !== 15;
         if (i + j < end) {
           const idx = i + j;
           const b = bytes[idx];
 
           const byteEl = document.createElement("span");
-          byteEl.className = "hex-byte";
+          byteEl.className = groupEnd ? "hex-byte hex-group-end" : "hex-byte";
           byteEl.dataset.idx = String(idx);
           byteEl.textContent = b.toString(16).padStart(2, "0").toUpperCase() + sep;
           hexSpan.appendChild(byteEl);
@@ -1074,7 +1103,7 @@
           asciiSpan.appendChild(charEl);
         } else {
           const blank = document.createElement("span");
-          blank.className = "hex-blank";
+          blank.className = groupEnd ? "hex-blank hex-group-end" : "hex-blank";
           blank.textContent = "  " + sep;
           hexSpan.appendChild(blank);
         }
@@ -1207,10 +1236,11 @@
 
     const ASCII_LEGEND = "0123456789ABCDEF";
     for (let j = 0; j < 16; j++) {
-      const sep = j % 2 === 1 ? " " : "";
+      const sep = " ";
+      const groupEnd = j % 4 === 3 && j !== 15;
 
       const colHex = document.createElement("span");
-      colHex.className = "hex-byte hex-col-header";
+      colHex.className = groupEnd ? "hex-byte hex-col-header hex-group-end" : "hex-byte hex-col-header";
       colHex.dataset.col = String(j);
       colHex.textContent = j.toString(16).padStart(2, "0").toUpperCase() + sep;
       headerHex.appendChild(colHex);
