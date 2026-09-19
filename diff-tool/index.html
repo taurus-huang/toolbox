@@ -2966,15 +2966,83 @@ document.getElementById('editor-wrap').addEventListener('keydown', (e)=>{
   }
 });
 
-/* Enter over a cross-line selection: split the selection's remainder onto
-   a new line, same as a normal editor. (Enter with no selection, or a
-   selection confined to a single line, is left to the browser's own
-   default contenteditable behavior, unchanged from before.) */
+/* Split line lineIdx into two at [startOffset, endOffset) (a collapsed
+   caret when startOffset===endOffset, otherwise the line's own selected
+   text gets dropped, same as a normal editor overtyping a selection),
+   pushing everything from the split point onward onto a brand-new line
+   in state. This is the single-line counterpart to
+   replaceCrossLineSelection: it exists because Enter can't just be left
+   to the browser's default contenteditable behavior here (see below). */
+function splitLineInColumn(col, lineIdx, startOffset, endOffset){
+  const container = document.getElementById('lines-' + col);
+  if(!container) return;
+
+  const lineEls = container.querySelectorAll('.line:not(.empty) .content[contenteditable="true"]');
+  const liveLines = [];
+  lineEls.forEach(elx=>{ liveLines[+elx.dataset.lineIdx] = elx.textContent.replace(/\r/g, ''); });
+  if(lineIdx < 0 || lineIdx >= liveLines.length) return;
+
+  const line = liveLines[lineIdx] || '';
+  const prefix = line.slice(0, startOffset);
+  const suffix = line.slice(endOffset);
+  liveLines.splice(lineIdx, 1, prefix, suffix);
+
+  // A pending debounced commit from ordinary typing is now superseded by
+  // this (which already reads the live, up-to-the-moment text) -- cancel
+  // it so it doesn't redundantly re-fire and re-render afterward.
+  if(editDebounce){ clearTimeout(editDebounce); editDebounce = null; }
+
+  pushHistory(col);
+  state.cols[col].text = liveLines.join('\n');
+  recompute({keepView:true, restoreCaret:{col, lineIdx:lineIdx+1, offset:0}});
+}
+
+/* Enter key. Each line is rendered as its own separate contenteditable
+   div (see renderColumn), so there is no surrounding document flow for
+   the browser's native "split into a new line" behavior to fall into --
+   left to itself, the browser can only fake a second line inside that
+   same single-line div (e.g. via a <br> or a nested block), which looks
+   like a real line break for a moment. But nothing in state knows about
+   that fake line: the next debounced commit reads the div's flattened
+   textContent back as one line, and recompute() re-renders straight from
+   state, so the fake line break silently collapses back into a single
+   line a moment later. Handle Enter manually in every case -- collapsed
+   caret, a selection within one line, or a selection spanning several
+   lines -- so it always turns into a real new line in state instead. */
 document.getElementById('editor-wrap').addEventListener('keydown', (e)=>{
-  if(e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+  if(e.key !== 'Enter' || e.ctrlKey || e.metaKey || e.altKey) return;
   const el = e.target.closest && e.target.closest('.content[contenteditable="true"]');
   if(!el) return;
-  if(replaceCrossLineSelection('\n')) e.preventDefault();
+
+  const sel = window.getSelection();
+  if(sel && sel.rangeCount>0 && !sel.isCollapsed){
+    const range = sel.getRangeAt(0);
+    const startEl = closestContentEl(range.startContainer);
+    const endEl = closestContentEl(range.endContainer);
+    if(startEl && endEl && startEl.dataset.col===endEl.dataset.col && startEl!==endEl){
+      e.preventDefault();
+      replaceCrossLineSelection('\n');
+      return;
+    }
+    if(startEl===el && endEl===el){
+      e.preventDefault();
+      const startOffset = charOffsetInEl(el, range.startContainer, range.startOffset);
+      const endOffset = charOffsetInEl(el, range.endContainer, range.endOffset);
+      const col = el.dataset.col;
+      const lineIdx = parseInt(el.dataset.lineIdx, 10);
+      if(Number.isNaN(lineIdx)) return;
+      splitLineInColumn(col, lineIdx, Math.min(startOffset,endOffset), Math.max(startOffset,endOffset));
+      return;
+    }
+  }
+
+  // Collapsed caret within a single line.
+  e.preventDefault();
+  const col = el.dataset.col;
+  const lineIdx = parseInt(el.dataset.lineIdx, 10);
+  if(Number.isNaN(lineIdx)) return;
+  const offset = getCaretCharOffset(el);
+  splitLineInColumn(col, lineIdx, offset, offset);
 });
 
 /* Typing a character, IME composition, or a paste/drag-drop while a
