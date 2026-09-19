@@ -10,7 +10,7 @@
 <meta name="tool-desc" content="Display visual stopwatch down to milliseconds.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -29,6 +29,9 @@
     All sizing is driven by a single CSS variable --s (scale unit in px),
     set by JS on resize. Every dimension is a multiple of --s.
     Base design: 100 units wide per dial, layout ~380 units tall total.
+    --dh (digit height, px) is measured from the rendered font metrics so
+    the rolling ms digit strips line up pixel-perfectly with the h/m/s
+    digits, regardless of the browser's exact font-line-box math.
   */
   .container {
     display: flex;
@@ -48,9 +51,47 @@
     line-height: 1;
     user-select: none;
     white-space: nowrap;
+    display: flex;
+    align-items: flex-start;
   }
   .time-display .sep { color: #8888a8; }
-  .time-display .ms  { color: #e05a2b; font-size: inherit; font-family: inherit;}
+
+  /* rolling ms digits (compositor-animated) */
+  .ms {
+    color: #e05a2b;
+    display: inline-flex;
+  }
+  .digit-window {
+    display: inline-block;
+    overflow: hidden;
+    height: var(--dh, 1em);
+    width: 0.62em; /* Roboto Mono digit advance width */
+    vertical-align: top;
+  }
+  .digit-strip {
+    display: block;
+    will-change: transform;
+  }
+  .digit-strip .d {
+    display: block;
+    height: var(--dh, 1em);
+    line-height: var(--dh, 1em);
+    text-align: center;
+    font: inherit;
+    color: inherit;
+  }
+
+  /* offscreen probe used once to measure real digit height */
+  #dh-probe {
+    position: absolute;
+    visibility: hidden;
+    top: -9999px;
+    left: -9999px;
+    font-family: 'Roboto Mono', monospace;
+    font-size: calc(var(--s) * 10.3);
+    line-height: 1;
+    white-space: nowrap;
+  }
 
   .dials {
     display: flex;
@@ -77,6 +118,13 @@
     text-transform: uppercase;
     font-weight: 400;
     user-select: none;
+  }
+
+  .needle-g {
+    /* compositor-only transform: rotate around the dial's SVG-space center */
+    transform-box: view-box;
+    transform-origin: 100px 100px;
+    will-change: transform;
   }
 
   .buttons { display: flex; gap: calc(var(--s) * 2); }
@@ -123,7 +171,7 @@
 <div class="container" id="container">
 
   <div class="time-display" aria-live="off" aria-label="Elapsed time">
-    <span id="d-h">00</span><span class="sep">:</span><span id="d-m">00</span><span class="sep">:</span><span id="d-s">00</span><span class="sep">.</span><span class="ms" id="d-ms">000</span>
+    <span id="d-h">00</span><span class="sep">:</span><span id="d-m">00</span><span class="sep">:</span><span id="d-s">00</span><span class="sep">.</span><span class="ms" id="ms-wrap"></span>
   </div>
 
   <div class="dials" id="dials-row"></div>
@@ -139,6 +187,7 @@
   </div>
 
 </div>
+<div id="dh-probe">8</div>
 <script>
 (function () {
   /*
@@ -163,24 +212,50 @@
   const MIN_S = 1.2;
 
   const container = document.getElementById('container');
+  const dhProbe = document.getElementById('dh-probe');
 
   function applyScale() {
     const W = window.innerWidth;
     const H = window.innerHeight;
     const s = Math.max(MIN_S, Math.min(W / DU_W, H / DU_H));
     document.documentElement.style.setProperty('--s', s + 'px');
+    // measure the real rendered digit height at this scale and lock it
+    // to an integer px so the rolling strips have no sub-pixel seam
+    const dh = Math.round(dhProbe.getBoundingClientRect().height);
+    document.documentElement.style.setProperty('--dh', dh + 'px');
   }
 
   applyScale();
   window.addEventListener('resize', applyScale);
 
-  /* ── Build dials ── */
+  /* ── Build rolling ms digit strips (hundreds, tens, units) ── */
+  const msWrap = document.getElementById('ms-wrap');
+  const PERIODS = [1000, 100, 10]; // hundreds / tens / units place, in ms
+
+  function buildDigitWindow() {
+    const win = document.createElement('span');
+    win.className = 'digit-window';
+    const strip = document.createElement('span');
+    strip.className = 'digit-strip';
+    for (let i = 0; i < 10; i++) {
+      const d = document.createElement('span');
+      d.className = 'd';
+      d.textContent = i;
+      strip.appendChild(d);
+    }
+    win.appendChild(strip);
+    msWrap.appendChild(win);
+    return strip;
+  }
+
+  const digitStrips = PERIODS.map(buildDigitWindow);
+
+  /* ── Build dials (SVG faces are static; only the needle <g> is animated) ── */
   const LABELS = ['Hundreds', 'Tens', 'Units'];
   const dialsRow = document.getElementById('dials-row');
   const dH = document.getElementById('d-h');
   const dM = document.getElementById('d-m');
   const dS = document.getElementById('d-s');
-  const dMs = document.getElementById('d-ms');
   const btnStart = document.getElementById('btn-start');
   const btnReset = document.getElementById('btn-reset');
   const dFps = document.getElementById('d-fps');
@@ -188,6 +263,7 @@
 
   const NS = 'http://www.w3.org/2000/svg';
   const VB = 200, CX = 100, CY = 100, R = 86;
+  const needleGroups = [];
 
   function buildDial(idx) {
     const wrap = document.createElement('div');
@@ -241,8 +317,7 @@
     }
 
     const needleG = document.createElementNS(NS, 'g');
-    needleG.id = `needle-${idx}`;
-    needleG.setAttribute('transform', `rotate(0, ${CX}, ${CY})`);
+    needleG.classList.add('needle-g');
     const poly = document.createElementNS(NS, 'polygon');
     const tipR = R - 20, baseOff = 12, baseW = 3.5;
     poly.setAttribute('points',
@@ -250,6 +325,7 @@
     poly.setAttribute('fill', '#e05a2b');
     needleG.appendChild(poly);
     svg.appendChild(needleG);
+    needleGroups.push(needleG);
 
     const cap = document.createElementNS(NS, 'circle');
     cap.setAttribute('cx', CX); cap.setAttribute('cy', CY); cap.setAttribute('r', 4.5);
@@ -268,31 +344,65 @@
 
   for (let i = 0; i < 3; i++) buildDial(i);
 
-  /* ── Timer ── */
+  /* ── Compositor animations (Web Animations API, transform-only) ──
+     These run entirely on the compositor thread once .play() is called:
+     the browser advances their currentTime against the real display
+     clock, independent of whatever rate the main-thread rAF (measured
+     by the diag panel below) is actually getting. */
+  const compositorAnims = []; // {anim, period} pairs, one per PERIODS entry
+  function addCompositorAnim(anim, period) {
+    compositorAnims.push({ anim, period });
+    return anim;
+  }
+
+  digitStrips.forEach((strip, i) =>
+    addCompositorAnim(
+      strip.animate(
+        [{ transform: 'translateY(0%)' }, { transform: 'translateY(-100%)' }],
+        { duration: PERIODS[i], iterations: Infinity, easing: 'steps(10, end)', fill: 'forwards' }
+      ),
+      PERIODS[i]
+    )
+  );
+
+  needleGroups.forEach((g, i) =>
+    addCompositorAnim(
+      g.animate(
+        [{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }],
+        { duration: PERIODS[i], iterations: Infinity, easing: 'linear', fill: 'forwards' }
+      ),
+      PERIODS[i]
+    )
+  );
+
+  const allAnims = compositorAnims.map(x => x.anim);
+  allAnims.forEach(a => a.pause());
+
+  function syncAnimsTo(elapsedMs) {
+    compositorAnims.forEach(({ anim, period }) => { anim.currentTime = elapsedMs % period; });
+  }
+
+  /* ── Timer ──
+     h/m/s and the fps/frame diagnostics don't need compositor precision,
+     so they stay on plain JS text updates driven by rAF, exactly as
+     before. The needles and ms digits no longer go through this path. */
   let startTs = null, elapsed = 0, running = false, raf = null;
   function pad(n, w) { return String(n).padStart(w, '0'); }
 
-  function render(totalMs) {
+  function updateSlowDigits(totalMs) {
     const ms = Math.floor(totalMs);
-    dH.textContent  = pad(Math.floor(ms / 3600000), 2);
-    dM.textContent  = pad(Math.floor((ms % 3600000) / 60000), 2);
-    dS.textContent  = pad(Math.floor((ms % 60000) / 1000), 2);
-    const ms3 = ms % 1000;
-    dMs.textContent = pad(ms3, 3);
-
-    const fracs = [ms3 / 1000, (ms3 % 100) / 100, (ms3 % 10) / 10];
-    for (let i = 0; i < 3; i++) {
-      const el = document.getElementById(`needle-${i}`);
-      if (el) el.setAttribute('transform', `rotate(${fracs[i] * 360}, ${CX}, ${CY})`);
-    }
+    dH.textContent = pad(Math.floor(ms / 3600000), 2);
+    dM.textContent = pad(Math.floor((ms % 3600000) / 60000), 2);
+    dS.textContent = pad(Math.floor((ms % 60000) / 1000), 2);
   }
 
   /* ── rAF fps + frame counter ──
      Frame counter increments once per rAF callback while running, and is
      reset by Reset. FPS is measured from the actual rAF callback interval
      (exponentially smoothed) rather than assumed, so it reflects whatever
-     rate the browser/display is really delivering. Both only advance
-     while the stopwatch is running, matching the Start/Pause/Reset spec. */
+     rate the browser/display is really delivering. This measures the
+     main-thread rAF loop only — it is unaffected by, and does not affect,
+     the WAAPI-driven needles/ms digits above. */
   let frameCount = 0;
   let lastFrameTs = null;
   let fpsSmoothed = 0;
@@ -315,7 +425,7 @@
   function tick(now) {
     if (!running) return;
     updateDiag(now);
-    render(elapsed + (performance.now() - startTs));
+    updateSlowDigits(elapsed + (performance.now() - startTs));
     raf = requestAnimationFrame(tick);
   }
 
@@ -323,12 +433,15 @@
     if (!running) {
       running = true; startTs = performance.now();
       lastFrameTs = null; // avoid counting the paused gap as a frame interval
+      syncAnimsTo(elapsed);
+      allAnims.forEach(a => a.play());
       btnStart.textContent = 'Pause';
       btnStart.classList.add('running');
       raf = requestAnimationFrame(tick);
     } else {
       running = false;
       elapsed += performance.now() - startTs;
+      allAnims.forEach(a => a.pause());
       cancelAnimationFrame(raf);
       btnStart.textContent = 'Start';
       btnStart.classList.remove('running');
@@ -338,15 +451,16 @@
   btnReset.addEventListener('click', () => {
     running = false; cancelAnimationFrame(raf);
     elapsed = 0; startTs = null;
+    allAnims.forEach(a => { a.pause(); a.currentTime = 0; });
     btnStart.textContent = 'Start';
     btnStart.classList.remove('running');
     frameCount = 0; lastFrameTs = null; fpsSmoothed = 0;
     dFrame.textContent = '0';
     dFps.textContent = '0.0';
-    render(0);
+    updateSlowDigits(0);
   });
 
-  render(0);
+  updateSlowDigits(0);
 })();
 </script>
 </body>
