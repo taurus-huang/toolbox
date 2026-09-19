@@ -103,6 +103,17 @@
     background: rgba(224,90,43,0.18);
   }
   #btn-start.running:hover { background: rgba(224,90,43,0.28); }
+
+  .diag {
+    display: flex;
+    gap: calc(var(--s) * 3);
+    font-family: 'Roboto Mono', monospace;
+    color: #7a7a9c;
+    font-size: calc(var(--s) * 2);
+    letter-spacing: 0.02em;
+    user-select: none;
+  }
+  .diag b { color: #c8c8e8; font-weight: 500; }
 </style>
 </head>
 <body>
@@ -119,6 +130,11 @@
     <button class="btn" id="btn-reset">Reset</button>
   </div>
 
+  <div class="diag">
+    <span>rAF: <b id="d-fps">0.0</b> fps</span>
+    <span>Frame: <b id="d-frame">0</b></span>
+  </div>
+
 </div>
 <script>
 (function () {
@@ -127,19 +143,20 @@
       Time row height:  9 du (font-size) + line-height ~ 9 du
       Dials row height: 22 du (svg) + 1 du (gap) + 1.4 du (label) ~ 24.4 du
       Button row height: 1.1*2 + 1.8 ~ 4 du
-      3x gaps between rows: 3 * 4 = 12 du
+      Diag row height: ~1.5 du
+      4x gaps between rows: 4 * 4 = 16 du
       Top+bottom padding: 2 * 4 = 8 du
-      Total height ~ 9 + 24.4 + 4 + 12 + 8 = 57.4 du  → use 60 du
+      Total height ~ 9 + 24.4 + 4 + 1.5 + 16 + 8 = 62.9 du  → use 66 du
 
       Dials total width: 3 * 22 + 2 * 4 = 74 du
       Time display width: "00:00:00.000" = 12 chars * ~5.5du = 66 du (Share Tech Mono ~0.6em wide)
       Button row width: 2 * 14 + 1 * 2 = 30 du  (min-width based)
       Widest element ~ 74 du  → use 76 du (add side padding 2*2=4 → 76 du total)
 
-    Scale factor s = min(W / 76, H / 60)   [px per du]
+    Scale factor s = min(W / 76, H / 66)   [px per du]
     Clamped to minimum 1.2 px/du so tiny screens stay readable.
   */
-  const DU_W = 76, DU_H = 62;
+  const DU_W = 76, DU_H = 66;
   const MIN_S = 1.2;
 
   const container = document.getElementById('container');
@@ -163,6 +180,8 @@
   const dMs = document.getElementById('d-ms');
   const btnStart = document.getElementById('btn-start');
   const btnReset = document.getElementById('btn-reset');
+  const dFps = document.getElementById('d-fps');
+  const dFrame = document.getElementById('d-frame');
 
   const NS = 'http://www.w3.org/2000/svg';
   const VB = 200, CX = 100, CY = 100, R = 86;
@@ -265,8 +284,34 @@
     }
   }
 
-  function tick() {
+  /* ── rAF fps + frame counter ──
+     Frame counter increments once per rAF callback while running, and is
+     reset by Reset. FPS is measured from the actual rAF callback interval
+     (exponentially smoothed) rather than assumed, so it reflects whatever
+     rate the browser/display is really delivering. Both only advance
+     while the stopwatch is running, matching the Start/Pause/Reset spec. */
+  let frameCount = 0;
+  let lastFrameTs = null;
+  let fpsSmoothed = 0;
+
+  function updateDiag(now) {
+    frameCount++;
+    dFrame.textContent = String(frameCount);
+
+    if (lastFrameTs !== null) {
+      const delta = now - lastFrameTs;
+      if (delta > 0) {
+        const instFps = 1000 / delta;
+        fpsSmoothed = fpsSmoothed ? (fpsSmoothed * 0.9 + instFps * 0.1) : instFps;
+        dFps.textContent = fpsSmoothed.toFixed(1);
+      }
+    }
+    lastFrameTs = now;
+  }
+
+  function tick(now) {
     if (!running) return;
+    updateDiag(now);
     render(elapsed + (performance.now() - startTs));
     raf = requestAnimationFrame(tick);
   }
@@ -274,6 +319,7 @@
   btnStart.addEventListener('click', () => {
     if (!running) {
       running = true; startTs = performance.now();
+      lastFrameTs = null; // avoid counting the paused gap as a frame interval
       btnStart.textContent = 'Pause';
       btnStart.classList.add('running');
       raf = requestAnimationFrame(tick);
@@ -291,6 +337,9 @@
     elapsed = 0; startTs = null;
     btnStart.textContent = 'Start';
     btnStart.classList.remove('running');
+    frameCount = 0; lastFrameTs = null; fpsSmoothed = 0;
+    dFrame.textContent = '0';
+    dFps.textContent = '0.0';
     render(0);
   });
 
