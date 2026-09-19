@@ -68,6 +68,7 @@
     width: calc(var(--s) * 22);
     height: calc(var(--s) * 22);
     display: block;
+    user-select: none;
   }
   .dial-lbl {
     font-size: calc(var(--s) * 1.4);
@@ -75,6 +76,7 @@
     letter-spacing: 0.12em;
     text-transform: uppercase;
     font-weight: 400;
+    user-select: none;
   }
 
   .buttons { display: flex; gap: calc(var(--s) * 2); }
@@ -93,6 +95,7 @@
     transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s;
     min-width: calc(var(--s) * 14);
     text-transform: uppercase;
+    user-select: none;
   }
   .btn:hover  { background: #32323e; border-color: #9090b8; }
   .btn:active { transform: scale(0.97); }
