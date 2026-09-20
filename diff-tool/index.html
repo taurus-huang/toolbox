@@ -564,9 +564,7 @@
 
 <!-- ============ STATUS BAR ============ -->
 <div class="statusbar">
-  <div class="legend">
-    <span id="diff-counter">Diff: 0 / 0</span>
-  </div>
+  <div class="legend"></div>
   <div id="status-text">Ready</div>
 </div>
 
@@ -986,6 +984,27 @@ function buildPairBlocks(colA, colB){
   return blocks;
 }
 
+/* Which list of diff blocks First/Prev/Next/Last (and their enabled/
+   disabled state) should navigate through, given the column the caret is
+   currently focused in. In 2-way mode there's only one possible diff
+   relationship (left vs right), shared by both columns, so this is just
+   state.diffBlocks either way. In 3-way mode, though, state.diffBlocks is
+   the union of BOTH the left-vs-mid and mid-vs-right diffs -- effectively
+   centered on mid -- so navigating that combined list while focused in
+   the left or right pane can jump to a block that column isn't actually
+   part of (e.g. a left-vs-mid-only change, while the caret sits in the
+   right pane). Instead, when the focus is in the left or right column,
+   use only that column's own pairwise diff against mid, so navigation
+   always lands somewhere that column actually differs. A focus in mid
+   itself (which participates in both comparisons) keeps using the
+   combined list, same as before. */
+function getReferenceBlocksForCol(col){
+  if(state.mode !== '3way') return state.diffBlocks;
+  if(col === 'left') return buildPairBlocks('left','mid');
+  if(col === 'right') return buildPairBlocks('mid','right');
+  return state.diffBlocks;
+}
+
 /* ======================================================================
    Rendering
    ====================================================================== */
@@ -1104,12 +1123,15 @@ function updatePaneEmptyHints(){
    current cursor position (the same position goToDiff's own 'next'/'prev'
    already navigate relative to): First/Prev are disabled once the cursor
    is at or before the first diff (there's nothing earlier left to jump
-   to), and Last/Next are disabled once it's at or after the last diff. */
+   to), and Last/Next are disabled once it's at or after the last diff.
+   Which blocks count for this depends on which column the caret is
+   focused in -- see getReferenceBlocksForCol. */
 function updateDiffNavButtonStates(){
-  const total = state.diffBlocks.length;
   const cursor = getCursorPosition();
-  const prevExists = total>0 && state.diffBlocks.some(b => b.end < cursor.row);
-  const nextExists = total>0 && state.diffBlocks.some(b => b.start > cursor.row);
+  const refBlocks = getReferenceBlocksForCol(cursor.col);
+  const total = refBlocks.length;
+  const prevExists = total>0 && refBlocks.some(b => b.end < cursor.row);
+  const nextExists = total>0 && refBlocks.some(b => b.start > cursor.row);
   const firstBtn = document.getElementById('nav-first');
   const prevBtn = document.getElementById('nav-prev');
   const nextBtn = document.getElementById('nav-next');
@@ -1845,9 +1867,6 @@ function updateGutterViewport(){
    ====================================================================== */
 
 function updateDiffCounter(){
-  const total = state.diffBlocks.length;
-  const cur = total ? state.currentDiffIndex + 1 : 0;
-  document.getElementById('diff-counter').textContent = `Diff: ${cur} / ${total}`;
   updateDiffNavButtonStates();
 }
 
@@ -1940,43 +1959,57 @@ function focusCursorAt(row, col){
 }
 
 function goToDiff(target){
-  const n = state.diffBlocks.length;
+  const cursor = getCursorPosition();
+  const focusCol = cursor.col || 'left';
+
+  // Navigate relative to whichever column the caret is actually focused
+  // in: in 3-way mode that's the left-vs-mid diffs while focused in left,
+  // the mid-vs-right diffs while focused in right, or the combined list
+  // while focused in mid (2-way mode always uses the combined list, since
+  // there's only the one left-vs-right relationship either way).
+  const refBlocks = getReferenceBlocksForCol(focusCol);
+  const n = refBlocks.length;
   if(n===0) return;
 
-  const cursor = getCursorPosition();
-
-  let targetIdx;
+  let refIdx;
   if(target==='first'){
-    targetIdx = 0;
+    refIdx = 0;
   } else if(target==='last'){
-    targetIdx = n-1;
+    refIdx = n-1;
   } else if(target==='next'){
-    targetIdx = state.diffBlocks.findIndex(b => b.start > cursor.row);
-    if(targetIdx === -1) targetIdx = n-1;
+    refIdx = refBlocks.findIndex(b => b.start > cursor.row);
+    if(refIdx === -1) refIdx = n-1;
   } else if(target==='prev'){
-    targetIdx = -1;
+    refIdx = -1;
     for(let i=n-1; i>=0; i--){
-      if(state.diffBlocks[i].end < cursor.row){ targetIdx = i; break; }
+      if(refBlocks[i].end < cursor.row){ refIdx = i; break; }
     }
-    if(targetIdx === -1) targetIdx = 0;
+    if(refIdx === -1) refIdx = 0;
   }
 
+  const refBlock = refBlocks[refIdx];
+
+  // Map the chosen column-specific block onto its enclosing entry in the
+  // combined state.diffBlocks list -- the same start-row containment
+  // lookup used when a gutter marker is clicked -- so the diff counter,
+  // current-diff highlight, and everything else keyed off
+  // state.currentDiffIndex keep working exactly as before.
+  let targetIdx = state.diffBlocks.findIndex(b => refBlock.start>=b.start && refBlock.start<=b.end);
+  if(targetIdx === -1) targetIdx = 0;
   state.currentDiffIndex = targetIdx;
-  const block = state.diffBlocks[targetIdx];
 
   // Land the caret on the first real line of the block in the reference
   // column; if the block is only gap markers there, land just after it,
   // but remember the block's start as the gap anchor for future nav.
-  const focusCol = cursor.col || 'left';
-  let focusRow = firstRealRowInBlock(block, focusCol);
+  let focusRow = firstRealRowInBlock(refBlock, focusCol);
   let gapAnchor = null;
   if(focusRow === null){
-    focusRow = Math.min(block.end+1, state.rows.length-1);
-    gapAnchor = block.start;
+    focusRow = Math.min(refBlock.end+1, state.rows.length-1);
+    gapAnchor = refBlock.start;
   }
 
   render();
-  if(!isBlockFullyVisible(block)){
+  if(!isBlockFullyVisible(refBlock)){
     scrollToRow(focusRow);
   } else {
     // Already fully in view: leave the scroll position alone, but the
@@ -1989,7 +2022,11 @@ function goToDiff(target){
   state.cursorCol = focusCol;
   state.cursorGapAnchor = gapAnchor;
   updateDiffCounter();
-  setStatus(`Jumped to diff ${targetIdx+1} / ${n}`);
+  // Reported relative to the focused column's own reference-block list
+  // (refBlocks/refIdx/n), same list First/Prev/Next/Last just navigated
+  // through -- not the combined state.diffBlocks count -- so the message
+  // matches what that column actually sees.
+  setStatus(`Jumped to diff ${refIdx+1} / ${n}`);
 }
 
 /* ======================================================================
