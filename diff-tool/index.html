@@ -2811,6 +2811,27 @@ function setCaretCharOffset(el, offset){
   }catch(err){ /* ignore */ }
 }
 
+/* Same walk as setCaretCharOffset, but returns the resolved (node, offset)
+   pair instead of applying it to the Selection -- used by keyboard
+   Shift+Arrow selection below, which needs to hand that pair to
+   extendToPoint rather than collapse the caret onto it. */
+function nodeOffsetForCharOffset(el, offset){
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+  let remaining = offset;
+  let node = walker.nextNode();
+  if(!node) return {node: el, offset: 0};
+  let target = node, targetOffset = 0;
+  while(node){
+    const len = node.textContent.length;
+    if(remaining <= len){ target = node; targetOffset = remaining; break; }
+    remaining -= len;
+    const next = walker.nextNode();
+    if(!next){ target = node; targetOffset = len; break; } // clamp to end of last text node
+    node = next;
+  }
+  return {node: target, offset: targetOffset};
+}
+
 document.getElementById('editor-wrap').addEventListener('keydown', (e)=>{
   if(e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
   if(e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return; // leave modified combos to default handling
@@ -3163,9 +3184,12 @@ document.getElementById('editor-wrap').addEventListener('beforeinput', (e)=>{
     return rA.compareBoundaryPoints(Range.START_TO_START, rB) > 0;
   }
 
-  function extendTo(x, y){
-    const caret = caretFromPoint(x, y);
-    if(!caret || !anchorNode) return;
+  /* Core of extendTo below, factored out so keyboard Shift+Arrow selection
+     (see setupKeyboardSelection further down) can extend the selection to
+     an arbitrary (node, offset) it computed itself, the same way a mouse
+     drag extends to wherever the pointer is. */
+  function extendToPoint(node, offset){
+    if(!anchorNode) return;
     const sel = window.getSelection();
     if(!sel) return;
     try{
@@ -3187,12 +3211,18 @@ document.getElementById('editor-wrap').addEventListener('beforeinput', (e)=>{
       // same selected Range as before, just always as a "forward"
       // selection, which never hits the bug.
       let baseNode = anchorNode, baseOffset = anchorOffset;
-      let extNode = caret.node, extOffset = caret.offset;
+      let extNode = node, extOffset = offset;
       if(isAfter(baseNode, baseOffset, extNode, extOffset)){
         [baseNode, baseOffset, extNode, extOffset] = [extNode, extOffset, baseNode, baseOffset];
       }
       sel.setBaseAndExtent(baseNode, baseOffset, extNode, extOffset);
     }catch(err){ /* point briefly resolved to an invalid range mid-drag; ignore */ }
+  }
+
+  function extendTo(x, y){
+    const caret = caretFromPoint(x, y);
+    if(!caret) return;
+    extendToPoint(caret.node, caret.offset);
   }
 
   /* Whether (x,y) falls inside the current (possibly cross-line) selection.
@@ -3348,6 +3378,143 @@ document.getElementById('editor-wrap').addEventListener('beforeinput', (e)=>{
 
   document.addEventListener('mouseup', ()=>{
     stopSelecting();
+  });
+
+  /* Shift+Arrow keyboard selection: for the same reason plain Up/Down
+     navigation and mouse-drag selection above both need custom handling
+     -- each line is its own separate contenteditable div, so there's
+     nothing on the other side of that boundary for the browser's own
+     shift+arrow extension to reach across -- native shift+arrow can only
+     ever extend as far as the edge of whichever line currently has focus.
+     Reuses this same IIFE's anchor/extendToPoint machinery, so a
+     selection can be started or continued interchangeably with the mouse
+     or the keyboard, and the result is exactly the same kind of Selection
+     either way -- meaning it's already copy/cut/context-menu-safe via the
+     handlers below (buildMultiLineClipboardText, the 'copy'/'cut'
+     listeners, and the contextmenu listener) without any changes there. */
+  function isSamePoint(nodeA, offsetA, nodeB, offsetB){
+    return nodeA === nodeB && offsetA === offsetB;
+  }
+
+  document.addEventListener('keydown', (e)=>{
+    if(!e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return; // leave modified combos to default handling
+    if(e.key!=='ArrowUp' && e.key!=='ArrowDown' && e.key!=='ArrowLeft' && e.key!=='ArrowRight') return;
+    const focusEl = document.activeElement && document.activeElement.closest
+      && document.activeElement.closest('.content[contenteditable="true"]');
+    if(!focusEl) return;
+
+    const sel = window.getSelection();
+    if(!sel || sel.rangeCount===0) return;
+
+    let curNode, curOffset;
+    // Whether the *existing* selection (if any) already spans more than
+    // one line. If it does, native Left/Right handling can't be trusted
+    // even for a move that wouldn't itself cross a line boundary -- the
+    // browser has no notion of "the other end lives in a different
+    // contenteditable div" and tends to just drop that end rather than
+    // preserve it, collapsing the selection back onto a single line. So
+    // once a selection is already cross-line, every further Left/Right
+    // press has to be handled here too, not just the ones that cross a
+    // new boundary.
+    let alreadyCrossLine;
+    if(sel.isCollapsed){
+      // Nothing selected yet: this press starts a fresh selection,
+      // anchored at wherever the caret currently sits (same as native
+      // shift+arrow).
+      const range = sel.getRangeAt(0);
+      anchorNode = range.startContainer; anchorOffset = range.startOffset;
+      anchorCol = focusEl.dataset.col;
+      curNode = anchorNode; curOffset = anchorOffset;
+      alreadyCrossLine = false;
+    } else if(anchorNode && anchorCol === focusEl.dataset.col){
+      // Continuing an existing selection (started here by an earlier
+      // shift+arrow press, a mouse drag, or a shift+click): find the
+      // *other* end -- the one currently moving -- by checking which of
+      // the Selection's two ends matches our tracked, never-moving
+      // anchor. This can't just always be sel.focusNode: extendToPoint
+      // always passes its two endpoints to setBaseAndExtent in document
+      // order (see the comment there), so which of anchorNode/focusNode
+      // holds our fixed anchor vs. the moving end flips depending on
+      // whether the selection is extending forward or backward from it.
+      if(isSamePoint(sel.anchorNode, sel.anchorOffset, anchorNode, anchorOffset)){
+        curNode = sel.focusNode; curOffset = sel.focusOffset;
+      } else {
+        curNode = sel.anchorNode; curOffset = sel.anchorOffset;
+      }
+      const selAnchorEl = closestContentEl(sel.anchorNode);
+      const selFocusEl = closestContentEl(sel.focusNode);
+      alreadyCrossLine = !selAnchorEl || !selFocusEl || selAnchorEl !== selFocusEl;
+    } else {
+      return; // a selection exists but isn't one we're tracking here (e.g. spans columns) -- leave it to the browser
+    }
+
+    const curEl = closestContentEl(curNode);
+    if(!curEl) return;
+    const col = curEl.dataset.col;
+    const container = document.getElementById('lines-' + col);
+    if(!container) return;
+    // Only the real (non-gap) lines in this column have a .content
+    // element, in top-to-bottom order, so stepping through this list
+    // already skips gap markers correctly (same as plain Up/Down above).
+    const allContents = Array.from(container.querySelectorAll('.content[contenteditable="true"]'));
+    const curIdx = allContents.indexOf(curEl);
+    if(curIdx === -1) return;
+
+    let targetEl = curEl, targetOffset;
+
+    if(e.key === 'ArrowLeft' || e.key === 'ArrowRight'){
+      const charOffset = charOffsetInEl(curEl, curNode, curOffset);
+      if(e.key === 'ArrowRight'){
+        if(charOffset < curEl.textContent.length){
+          if(!alreadyCrossLine) return; // simple in-line extension: native already handles this correctly
+          targetOffset = charOffset + 1; // still cross-line elsewhere -- must keep handling it ourselves to preserve that other end
+        } else if(curIdx+1 < allContents.length){
+          targetEl = allContents[curIdx+1];
+          targetOffset = 0;
+        } else {
+          if(alreadyCrossLine) e.preventDefault(); // nothing further to extend to, but don't let native touch a cross-line selection
+          return;
+        }
+      } else {
+        if(charOffset > 0){
+          if(!alreadyCrossLine) return; // simple in-line extension: native already handles this correctly
+          targetOffset = charOffset - 1;
+        } else if(curIdx-1 >= 0){
+          targetEl = allContents[curIdx-1];
+          targetOffset = targetEl.textContent.length;
+        } else {
+          if(alreadyCrossLine) e.preventDefault();
+          return;
+        }
+      }
+    } else {
+      const targetIdx = e.key==='ArrowDown' ? curIdx+1 : curIdx-1;
+      if(targetIdx < 0 || targetIdx >= allContents.length){
+        if(alreadyCrossLine) e.preventDefault();
+        return; // already at the first/last line
+      }
+      targetEl = allContents[targetIdx];
+      const charOffset = charOffsetInEl(curEl, curNode, curOffset);
+      targetOffset = Math.min(charOffset, targetEl.textContent.length);
+    }
+
+    e.preventDefault();
+    const target = nodeOffsetForCharOffset(targetEl, targetOffset);
+    extendToPoint(target.node, target.offset);
+
+    // Scroll the target line into view within its own pane if needed,
+    // same as plain (non-shift) Up/Down navigation above.
+    const paneScroll = container.parentElement;
+    const lineEl = targetEl.closest('.line');
+    if(paneScroll && lineEl){
+      const scrollRect = paneScroll.getBoundingClientRect();
+      const lineRect = lineEl.getBoundingClientRect();
+      if(lineRect.top < scrollRect.top){
+        paneScroll.scrollTop -= (scrollRect.top - lineRect.top);
+      } else if(lineRect.bottom > scrollRect.bottom){
+        paneScroll.scrollTop += (lineRect.bottom - scrollRect.bottom);
+      }
+    }
   });
 })();
 
