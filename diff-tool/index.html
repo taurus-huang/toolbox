@@ -3151,13 +3151,47 @@ document.getElementById('editor-wrap').addEventListener('beforeinput', (e)=>{
     return null;
   }
 
+  /* True if (nodeA, offsetA) sits after (nodeB, offsetB) in document order.
+     Used below to always hand setBaseAndExtent its two endpoints in
+     document order, regardless of which one the user actually clicked
+     first -- see extendTo. */
+  function isAfter(nodeA, offsetA, nodeB, offsetB){
+    const rA = document.createRange();
+    rA.setStart(nodeA, offsetA);
+    const rB = document.createRange();
+    rB.setStart(nodeB, offsetB);
+    return rA.compareBoundaryPoints(Range.START_TO_START, rB) > 0;
+  }
+
   function extendTo(x, y){
     const caret = caretFromPoint(x, y);
     if(!caret || !anchorNode) return;
     const sel = window.getSelection();
     if(!sel) return;
     try{
-      sel.setBaseAndExtent(anchorNode, anchorOffset, caret.node, caret.offset);
+      // Chrome bug: when the drag's starting point (offset 0, i.e. the
+      // very front of a line) ends up as the Selection's "base" of a
+      // *backward* selection -- which happens whenever the user starts
+      // right at the front of a line and drags upward into an earlier
+      // line's separate contenteditable div -- the resulting Selection
+      // silently breaks: its toString() comes back empty and the native
+      // right-click "Copy" menu item is disabled, even though the
+      // selected Range itself is perfectly valid. Our own anchor
+      // bookkeeping above (anchorNode/anchorOffset, used for future
+      // shift+click extension) doesn't care which endpoint the native
+      // Selection calls "base" vs "extent", and neither does anything
+      // downstream (buildMultiLineClipboardText etc. all read
+      // range.startContainer/endContainer, which are already normalized
+      // to document order regardless). So always pass the two endpoints
+      // to setBaseAndExtent in document order -- this yields the exact
+      // same selected Range as before, just always as a "forward"
+      // selection, which never hits the bug.
+      let baseNode = anchorNode, baseOffset = anchorOffset;
+      let extNode = caret.node, extOffset = caret.offset;
+      if(isAfter(baseNode, baseOffset, extNode, extOffset)){
+        [baseNode, baseOffset, extNode, extOffset] = [extNode, extOffset, baseNode, baseOffset];
+      }
+      sel.setBaseAndExtent(baseNode, baseOffset, extNode, extOffset);
     }catch(err){ /* point briefly resolved to an invalid range mid-drag; ignore */ }
   }
 
@@ -3377,6 +3411,35 @@ document.getElementById('editor-wrap').addEventListener('copy', (e)=>{
   if(text === null) return;
   e.clipboardData.setData('text/plain', text);
   e.preventDefault();
+});
+
+/* Right-click on a selection that spans multiple lines: because each line
+   lives in its own separate contenteditable div, a known Chromium quirk
+   with this kind of cross-element selection leaves the native right-click
+   menu's "Copy" item disabled -- greyed out and unresponsive -- specifically
+   when the selection's edge sits at the very front (column 0) of one of
+   those divs, even though the selection itself is perfectly valid and the
+   'copy' handler above would reconstruct its text correctly. Since that
+   menu item's enabled/disabled state isn't something we can control, write
+   the correct text to the clipboard ourselves right as the menu opens --
+   a right-click is a genuine user gesture, so the Clipboard API is allowed
+   here -- so copying works regardless of whether "Copy" itself is greyed
+   out. A single-line selection is left alone; the browser's native Copy
+   already works fine there. */
+document.getElementById('editor-wrap').addEventListener('contextmenu', (e)=>{
+  const sel = window.getSelection();
+  if(!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+
+  const startEl = closestContentEl(range.startContainer);
+  const endEl = closestContentEl(range.endContainer);
+  if(!startEl || !endEl || startEl.dataset.col !== endEl.dataset.col || startEl === endEl) return;
+
+  const text = buildMultiLineClipboardText(range, startEl, endEl);
+  if(text === null) return;
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).catch(()=>{ /* ignore -- native Copy still works if it's actually enabled */ });
+  }
 });
 
 /* Cut (Ctrl+X) over a selection spanning multiple lines: same reasoning
