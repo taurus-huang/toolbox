@@ -2920,6 +2920,54 @@ document.getElementById('editor-wrap').addEventListener('keydown', (e)=>{
   }
 });
 
+/* PageUp/PageDown: scroll the pane by one screenful and move the caret
+   along with it, like a normal text editor -- by default the browser just
+   tries to page-scroll within whichever tiny per-line contenteditable div
+   currently has focus (the same per-line-div issue as Up/Down and
+   Left/Right above), which visibly does nothing useful and leaves the
+   caret behind wherever it was. Moves the caret by the same number of
+   lines the view scrolls, so it lands in roughly the same on-screen spot
+   as before, the same as most editors. */
+document.getElementById('editor-wrap').addEventListener('keydown', (e)=>{
+  if(e.key !== 'PageUp' && e.key !== 'PageDown') return;
+  if(e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return; // leave modified combos to default handling
+  const el = e.target.closest && e.target.closest('.content[contenteditable="true"]');
+  if(!el) return;
+
+  const col = el.dataset.col;
+  const container = document.getElementById('lines-' + col);
+  const paneScroll = document.getElementById('scroll-' + col);
+  if(!container || !paneScroll) return;
+
+  e.preventDefault();
+
+  // Only the real (non-gap) lines in this column have a .content element,
+  // in top-to-bottom order, so stepping through this list already skips
+  // gap markers correctly (same as Up/Down above); gap rows also take up
+  // zero rendered height (see LINE_H usage elsewhere), so counting by
+  // index here lines up with counting by pixels below.
+  const allContents = Array.from(container.querySelectorAll('.content[contenteditable="true"]'));
+  const idx = allContents.indexOf(el);
+  if(idx === -1) return;
+
+  // How many lines make up one "page": as many whole lines as fit in the
+  // pane's visible height. Using this same line count for both the scroll
+  // distance and the caret's line movement keeps them in lockstep, so the
+  // caret ends up at roughly the same on-screen row after paging.
+  const linesPerPage = Math.max(1, Math.floor(paneScroll.clientHeight / LINE_H));
+  const direction = e.key === 'PageDown' ? 1 : -1;
+
+  const maxScrollTop = Math.max(0, paneScroll.scrollHeight - paneScroll.clientHeight);
+  const newScrollTop = Math.max(0, Math.min(maxScrollTop, paneScroll.scrollTop + direction*linesPerPage*LINE_H));
+  paneScroll.scrollTop = newScrollTop; // the existing scroll-sync listener (setupScrollSync) keeps the other panes aligned to this
+
+  const targetIdx = Math.max(0, Math.min(allContents.length-1, idx + direction*linesPerPage));
+  const charOffset = getCaretCharOffset(el);
+  const targetEl = allContents[targetIdx];
+  targetEl.focus({preventScroll:true});
+  setCaretCharOffset(targetEl, charOffset);
+});
+
 /* ======================================================================
    Delete-at-end-of-line / Backspace-at-start-of-line: each line is its
    own separate contenteditable div (see renderColumn), so by default
