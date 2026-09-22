@@ -1958,6 +1958,38 @@ function focusCursorAt(row, col){
   sel.addRange(range);
 }
 
+/* Loading a file replaces the whole DOM via recompute(), which -- same as
+   any other structural recompute() -- drops focus and leaves no caret
+   visible anywhere. Give it one right after loading, landing wherever the
+   view already scrolled to (defaultCursorPosition: the first diff's first
+   real row, or row 0 if there's no diff), in the column that was just
+   loaded -- or, if that column turns out to have no content of its own
+   (e.g. it was the only one of two empty columns just filled in), whichever
+   column actually does. */
+function focusDefaultCaret(preferredCol){
+  let col = preferredCol;
+  if(!state.rows.some(r => r[col])){
+    col = ['left','mid','right'].find(c => state.rows.some(r => r[c]));
+  }
+  if(!col) return; // nothing loaded anywhere yet
+
+  let row, focusRow;
+  if(state.diffBlocks.length){
+    const b = state.diffBlocks[0];
+    const realRow = firstRealRowInBlock(b, col);
+    row = b.start;
+    focusRow = realRow !== null ? realRow : Math.min(b.end+1, state.rows.length-1);
+  } else {
+    row = focusRow = 0;
+  }
+
+  focusCursorAt(focusRow, col);
+  state.cursorRow = focusRow;
+  state.cursorCol = col;
+  state.cursorGapAnchor = (row !== focusRow) ? row : null;
+  updateDiffNavButtonStates();
+}
+
 function goToDiff(target){
   const cursor = getCursorPosition();
   const focusCol = cursor.col || 'left';
@@ -2286,6 +2318,7 @@ async function openFile(col){
       state.cols[col].handle = handle;
       syncPathInput(col);
       recompute();
+      focusDefaultCaret(col);
       setStatus(`Opened ${colLabel(col)}: ${file.name}`);
     }catch(err){
       if(err && err.name === 'AbortError') return; // user cancelled the picker
@@ -2315,6 +2348,7 @@ document.getElementById('file-input').addEventListener('change', (e)=>{
     state.cols[col].handle = null; // classic <input type=file> cannot yield a re-readable handle
     syncPathInput(col);
     recompute();
+    focusDefaultCaret(col);
     setStatus(`Opened ${colLabel(col)}: ${fullPath}`);
   };
   reader.readAsText(file);
@@ -2512,6 +2546,7 @@ async function loadDroppedFile(col, dt){
         await loadFileIntoColumn(useCols[i], entries[i].file, entries[i].handle);
       }
       recompute();
+      focusDefaultCaret(useCols[0]);
       const summary = useCols.map((c,i)=>`${colLabel(c)}=${entries[i].file.name}`).join(', ');
       setStatus(`Switched to ${wantMode} and loaded ${useCols.length} files via drag & drop: ${summary}`);
     }catch(err){
@@ -2524,6 +2559,7 @@ async function loadDroppedFile(col, dt){
   try{
     await loadFileIntoColumn(col, entries[0].file, entries[0].handle);
     recompute();
+    focusDefaultCaret(col);
     setStatus(`Loaded ${colLabel(col)} via drag & drop: ${state.cols[col].fullPath}`);
   }catch(err){
     setStatus(`${colLabel(col)}: failed to read dropped file`);
