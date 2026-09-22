@@ -2666,6 +2666,24 @@ document.getElementById('nav-first').addEventListener('click', ()=>goToDiff('fir
 document.getElementById('nav-prev').addEventListener('click', ()=>goToDiff('prev'));
 document.getElementById('nav-next').addEventListener('click', ()=>goToDiff('next'));
 document.getElementById('nav-last').addEventListener('click', ()=>goToDiff('last'));
+
+/* Keyboard shortcuts for the First/Prev/Next/Last diff-navigation
+   buttons: Ctrl+Alt+Up/Down for First/Last, Alt+Up/Down for Prev/Next.
+   Routed through each button's own .click() (rather than calling
+   goToDiff directly) so a disabled button -- e.g. Prev with no earlier
+   diff to jump to -- correctly does nothing here too, same as clicking
+   it by hand would. */
+document.addEventListener('keydown', (e)=>{
+  if(!e.altKey || e.shiftKey) return;
+  if(e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  const btnId = (e.ctrlKey || e.metaKey)
+    ? (e.key==='ArrowUp' ? 'nav-first' : 'nav-last')
+    : (e.key==='ArrowUp' ? 'nav-prev' : 'nav-next');
+  e.preventDefault();
+  const btn = document.getElementById(btnId);
+  if(btn) btn.click();
+});
+
 document.getElementById('btn-recompute').addEventListener('click', async () => {
   setStatus('Reloading files and recomputing diff...');
   
