@@ -2871,6 +2871,55 @@ document.getElementById('editor-wrap').addEventListener('keydown', (e)=>{
   }
 });
 
+/* Plain (non-shift) Left/Right at the very start/end of a line: same
+   fundamental issue as Up/Down and Shift+Arrow above -- each line is its
+   own separate contenteditable div, so by default there's nothing on the
+   other side of that boundary for the caret to move into, and Left/Right
+   just stop dead at the edge instead of continuing into the
+   previous/next line like a normal text editor. Only takes over right at
+   that edge; ordinary within-line movement is left to the browser. */
+document.getElementById('editor-wrap').addEventListener('keydown', (e)=>{
+  if(e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  if(e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return; // leave modified combos (shift-select, word-jump) to default/other handling
+  const el = e.target.closest && e.target.closest('.content[contenteditable="true"]');
+  if(!el) return;
+  const sel = window.getSelection();
+  if(!sel || sel.rangeCount===0 || !sel.isCollapsed) return; // an active selection collapsing onto one edge is the browser's own job
+
+  const charOffset = getCaretCharOffset(el);
+  if(e.key === 'ArrowRight' && charOffset < el.textContent.length) return; // not at the end yet -- native handles this
+  if(e.key === 'ArrowLeft' && charOffset > 0) return; // not at the start yet -- native handles this
+
+  const col = el.dataset.col;
+  const container = document.getElementById('lines-' + col);
+  if(!container) return;
+  const allContents = Array.from(container.querySelectorAll('.content[contenteditable="true"]'));
+  const idx = allContents.indexOf(el);
+  if(idx === -1) return;
+  const targetIdx = e.key==='ArrowRight' ? idx+1 : idx-1;
+  if(targetIdx < 0 || targetIdx >= allContents.length) return; // already at the very first/last line
+
+  e.preventDefault();
+  const targetEl = allContents[targetIdx];
+  targetEl.focus({preventScroll:true});
+  setCaretCharOffset(targetEl, e.key==='ArrowRight' ? 0 : targetEl.textContent.length);
+
+  // Scroll the target line into view within its own pane only if needed,
+  // without disturbing horizontal scroll position -- same as plain Up/Down
+  // above.
+  const paneScroll = container.parentElement;
+  const lineEl = targetEl.closest('.line');
+  if(paneScroll && lineEl){
+    const scrollRect = paneScroll.getBoundingClientRect();
+    const lineRect = lineEl.getBoundingClientRect();
+    if(lineRect.top < scrollRect.top){
+      paneScroll.scrollTop -= (scrollRect.top - lineRect.top);
+    } else if(lineRect.bottom > scrollRect.bottom){
+      paneScroll.scrollTop += (lineRect.bottom - scrollRect.bottom);
+    }
+  }
+});
+
 /* ======================================================================
    Delete-at-end-of-line / Backspace-at-start-of-line: each line is its
    own separate contenteditable div (see renderColumn), so by default
