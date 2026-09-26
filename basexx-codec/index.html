@@ -1662,9 +1662,10 @@
   wireCopy(copyEnc, () => encText.value);
 
   // ---------- download buttons ----------
-  function downloadText(filename, content) {
-    const type = content instanceof Uint8Array ? "application/octet-stream" : "text/plain;charset=utf-8";
-    const blob = new Blob([content], { type });
+  // Anchor-click download: the only mechanism available on mobile browsers,
+  // and the fallback for any desktop browser that doesn't implement the
+  // File System Access API below (e.g. Firefox, Safari).
+  function downloadViaAnchor(filename, blob) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -1675,16 +1676,109 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  // Desktop browsers that support the File System Access API (currently
+  // Chrome/Edge and other Chromium-based browsers) get a real "Save As"
+  // dialog instead, via showSaveFilePicker. Mobile browsers never expose
+  // this API, so feature-detecting it is sufficient to separate the two
+  // cases without any user-agent sniffing.
+  const supportsFilePicker = typeof window.showSaveFilePicker === "function";
+
+  // The last directory the user saved to is remembered (per download
+  // button) as a FileSystemFileHandle in IndexedDB. Passing that handle as
+  // `startIn` on the next call makes the picker open in the same folder —
+  // handles aren't storable in localStorage, so IndexedDB is required.
+  const HANDLE_DB_NAME = "basexx-codec";
+  const HANDLE_STORE_NAME = "download-handles";
+
+  function openHandleDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(HANDLE_DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        req.result.createObjectStore(HANDLE_STORE_NAME);
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function getLastHandle(key) {
+    try {
+      const db = await openHandleDb();
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(HANDLE_STORE_NAME, "readonly");
+        const req = tx.objectStore(HANDLE_STORE_NAME).get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  async function setLastHandle(key, handle) {
+    try {
+      const db = await openHandleDb();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(HANDLE_STORE_NAME, "readwrite");
+        tx.objectStore(HANDLE_STORE_NAME).put(handle, key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch {
+      // Remembering the path is a convenience, not essential — ignore
+      // failures (e.g. private browsing modes that restrict IndexedDB).
+    }
+  }
+
+  async function downloadViaPicker(key, filename, blob) {
+    const previous = await getLastHandle(key);
+    const pickerOpts = {
+      suggestedName: filename,
+      types: [{ description: "Text file", accept: { "text/plain": [".txt"] } }],
+    };
+    let handle;
+    try {
+      handle = await window.showSaveFilePicker(
+        previous ? { ...pickerOpts, startIn: previous } : pickerOpts
+      );
+    } catch (err) {
+      if (err && err.name === "AbortError") return; // user canceled — no fallback needed
+      if (err && err.name === "NotAllowedError" && previous) {
+        // The remembered handle may no longer be usable as a starting
+        // point (e.g. its folder was removed); retry without the hint.
+        handle = await window.showSaveFilePicker(pickerOpts);
+      } else {
+        throw err;
+      }
+    }
+    const writable = await handle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    await setLastHandle(key, handle);
+  }
+
+  async function downloadFile(key, filename, content) {
+    if (!content || content.length === 0) return;
+    const type = content instanceof Uint8Array ? "application/octet-stream" : "text/plain;charset=utf-8";
+    const blob = new Blob([content], { type });
+    if (supportsFilePicker) {
+      try {
+        await downloadViaPicker(key, filename, blob);
+        return;
+      } catch (err) {
+        // Any unexpected picker/write failure falls back to the plain
+        // anchor download rather than leaving the click with no result.
+      }
+    }
+    downloadViaAnchor(filename, blob);
+  }
+
   downloadRaw.addEventListener("click", () => {
-    const value = rawBytesOverride || rawText.value;
-    if (!value || value.length === 0) return;
-    downloadText("raw-data.txt", value);
+    downloadFile("raw", "raw-data.txt", rawBytesOverride || rawText.value);
   });
 
   downloadEnc.addEventListener("click", () => {
-    const value = encText.value;
-    if (!value) return;
-    downloadText(`encoded-${formatSelect.value}.txt`, value);
+    downloadFile("encoded", `encoded-${formatSelect.value}.txt`, encText.value);
   });
 
   // ---------- draggable splitter ----------
