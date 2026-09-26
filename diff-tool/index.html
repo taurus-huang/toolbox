@@ -2632,6 +2632,44 @@ const ignoreNextScroll = { left:false, mid:false, right:false };
 function setupScrollSync(){
   const ids = ['scroll-left','scroll-mid','scroll-right'];
   const idToCol = id => id.slice('scroll-'.length);
+
+  // Step 2: among all diff blocks, which ones currently sit inside this
+  // column's visible area (VisibleAreaLines worth of rows, i.e. its own
+  // viewport) -- any block whose pixel span overlaps [viewTop, viewBottom]
+  // at all counts as "in" it -- and, of those, the lowest and highest
+  // block index (idxVisibleMin / idxVisibleMax). Returns null when no
+  // block is visible at all (the viewport is showing only unchanged rows).
+  function visibleBlockIndexRange(col, viewTop, viewBottom){
+    let idxMin = -1, idxMax = -1;
+    for(let i=0;i<state.diffBlocks.length;i++){
+      const b = state.diffBlocks[i];
+      const bTop = offsetForRow(col, b.start);
+      const bBottom = rowBottomOffset(col, b.end);
+      if(bBottom < viewTop || bTop > viewBottom) continue; // this block doesn't overlap the visible area at all
+      if(idxMin === -1) idxMin = i;
+      idxMax = i;
+    }
+    return idxMin === -1 ? null : {idxMin, idxMax};
+  }
+
+  // Steps 3-5: for this column, the pixel-space equivalent of
+  // DiffRangeLines (span from idxVisibleMin's first row to idxVisibleMax's
+  // last row) and RangeLines (that span plus one VisibleAreaLines' worth
+  // of room) -- i.e. the total scroll distance, in this column's own
+  // layout, over which that whole run of visible diff blocks travels from
+  // just entering the viewport at the bottom to just leaving it at the
+  // top. windowTop is the scrollTop at which it's *just* fully entering
+  // from the bottom (frac 0); windowTop+rangePixels is the scrollTop at
+  // which it's *just* fully left at the top (frac 1).
+  function diffRangeWindow(col, idxMin, idxMax, clientHeight){
+    const rangeTop = offsetForRow(col, state.diffBlocks[idxMin].start);
+    const rangeBottom = rowBottomOffset(col, state.diffBlocks[idxMax].end);
+    const diffRangePixels = rangeBottom - rangeTop; // DiffRangeLines, in pixels
+    const rangePixels = diffRangePixels + clientHeight; // RangeLines, in pixels
+    const windowTop = rangeTop - clientHeight;
+    return {rangePixels, windowTop};
+  }
+
   ids.forEach(id=>{
     const col = idToCol(id);
     document.getElementById(id).addEventListener('scroll', (e)=>{
@@ -2641,18 +2679,42 @@ function setupScrollSync(){
       const srcCol = col;
       const top = e.target.scrollTop;
       const left = e.target.scrollLeft;
-      // Find which row is at this pane's scroll position, then align every
-      // other pane to that same row using its own real layout, so the
-      // actual diff position stays lined up even if the panes' total
-      // rendered heights differ (due to collapsed add/del gaps).
+
+      // Find which row is at this pane's scroll position, for the
+      // fallback exact-row alignment used when no diff block is visible
+      // at all (plain unchanged content -- there's nothing for the
+      // RangeLines approach below to key off of, so keep lining that up
+      // row-for-row exactly, same as before).
       const row = rowAtOffset(srcCol, top);
       const remainder = top - offsetForRow(srcCol, row);
+
+      // Step 6: work out how far through its own RangeLines window this
+      // column's scroll position is (frac, 0..1), so every other column
+      // can be scrolled to the same fraction through its own RangeLines
+      // window -- lining up the *set* of diff blocks currently on screen
+      // between columns, proportionally, rather than any single row.
+      const range = visibleBlockIndexRange(srcCol, top, top + e.target.clientHeight);
+      let frac = null;
+      if(range){
+        const srcWindow = diffRangeWindow(srcCol, range.idxMin, range.idxMax, e.target.clientHeight);
+        frac = srcWindow.rangePixels > 0
+          ? Math.max(0, Math.min(1, (top - srcWindow.windowTop) / srcWindow.rangePixels))
+          : 0;
+      }
+
       ids.forEach(other=>{
         if(other!==id){
           const el = document.getElementById(other);
           if(!el.closest('.pane').classList.contains('hidden')){
             const otherCol = idToCol(other);
-            const newTop = Math.max(0, offsetForRow(otherCol, row) + remainder);
+            let newTop;
+            if(range){
+              const otherWindow = diffRangeWindow(otherCol, range.idxMin, range.idxMax, el.clientHeight);
+              newTop = otherWindow.windowTop + frac*otherWindow.rangePixels;
+            } else {
+              newTop = offsetForRow(otherCol, row) + remainder;
+            }
+            newTop = Math.max(0, newTop);
             // Only expect (and thus only ignore) an echo if we're actually
             // changing something -- an unchanged scrollTop/scrollLeft fires
             // no 'scroll' event at all, so flagging it anyway would leave
