@@ -1678,10 +1678,27 @@
 
   // Desktop browsers that support the File System Access API (currently
   // Chrome/Edge and other Chromium-based browsers) get a real "Save As"
-  // dialog instead, via showSaveFilePicker. Mobile browsers never expose
-  // this API, so feature-detecting it is sufficient to separate the two
-  // cases without any user-agent sniffing.
-  const supportsFilePicker = typeof window.showSaveFilePicker === "function";
+  // dialog instead, via showSaveFilePicker.
+  //
+  // Feature-detecting showSaveFilePicker alone isn't enough: some mobile
+  // Chromium browsers (e.g. Chrome on Android, confirmed on a Samsung S22)
+  // implement it too, but surface it as a bare file/folder chooser with no
+  // visible way to cancel — leaving the user stuck if they change their
+  // mind. So the picker path is gated on genuinely being a desktop browser,
+  // not just on API support.
+  function isMobileDevice() {
+    // User-Agent Client Hints give a direct, explicit signal where
+    // available (all Chromium browsers, including the Android one above).
+    if (navigator.userAgentData && typeof navigator.userAgentData.mobile === "boolean") {
+      return navigator.userAgentData.mobile;
+    }
+    // Fallback for browsers without Client Hints (Firefox, Safari): these
+    // don't support showSaveFilePicker at all today, so this branch mainly
+    // future-proofs against them gaining it later.
+    return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  }
+
+  const supportsFilePicker = typeof window.showSaveFilePicker === "function" && !isMobileDevice();
 
   // The last directory the user saved to is remembered (per download
   // button) as a FileSystemFileHandle in IndexedDB. Passing that handle as
