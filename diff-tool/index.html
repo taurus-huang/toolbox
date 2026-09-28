@@ -406,6 +406,7 @@
     padding:4px 10px;background:var(--toolbar);border-top:1px solid var(--border);
     font-size:11px;color:var(--muted);display:flex;justify-content:space-between;flex-shrink:0;
   }
+  .statusbar .status-error{color:#e53935;font-weight:600;}
   .legend{display:flex;gap:14px;align-items:center;}
   .legend span{display:flex;align-items:center;gap:5px;}
   .legend .swatch{width:12px;height:12px;border-radius:2px;display:inline-block;}
@@ -2437,9 +2438,9 @@ async function refreshFile(col){
       setStatus(`${colLabel(col)}: nothing to refresh — open a file first`);
       return;
     }
-    setStatus(`${colLabel(col)}: can't auto-refresh this file — please reselect it`);
+    setStatus(`${colLabel(col)}: can't auto-refresh this file — please reselect it`, true);
     openFile(col);
-    return;
+    return 'failed'; // lets the Re-diff button report this instead of overwriting it
   }
 
   try{
@@ -2449,8 +2450,8 @@ async function refreshFile(col){
       if(perm !== 'granted'){
         perm = await handle.requestPermission({ mode:'read' });
         if(perm !== 'granted'){
-          setStatus(`${colLabel(col)}: permission denied — can't refresh`);
-          return;
+          setStatus(`${colLabel(col)}: permission denied — can't refresh`, true);
+          return 'failed';
         }
       }
     }
@@ -2465,7 +2466,8 @@ async function refreshFile(col){
     recompute();
     setStatus(`Refreshed ${colLabel(col)} from disk: ${file.name}`);
   }catch(err){
-    setStatus(`${colLabel(col)}: refresh failed — file may have been moved or deleted`);
+    setStatus(`${colLabel(col)}: refresh failed — file may have been moved or deleted`, true);
+    return 'failed'; // lets the Re-diff button report this instead of overwriting it
   }
 }
 
@@ -2622,8 +2624,13 @@ function setupAllDropZones(){
 /* ======================================================================
    Status bar helper
    ====================================================================== */
-function setStatus(msg){
-  document.getElementById('status-text').textContent = msg;
+// Pass isError=true for exceptions (e.g. a file that can't be reloaded because
+// it was moved/deleted) to show the message in red so it stands out. Every
+// call resets the state, so the next normal message returns to default color.
+function setStatus(msg, isError){
+  const el = document.getElementById('status-text');
+  el.textContent = msg;
+  el.classList.toggle('status-error', !!isError);
 }
 
 /* ======================================================================
@@ -2803,25 +2810,44 @@ document.addEventListener('keydown', (e)=>{
 document.getElementById('btn-recompute').addEventListener('click', async () => {
   setStatus('Reloading files and recomputing diff...');
   
-  // Reload each column that has a previously loaded file, in order
-  if (state.cols.left.userLoaded)  await refreshFile('left');
-  if (state.mode === '3way' && state.cols.mid.userLoaded)   await refreshFile('mid');
-  if (state.cols.right.userLoaded) await refreshFile('right');
+  // Reload each column that has a previously loaded file, in order,
+  // remembering which ones couldn't be re-read (e.g. deleted or moved).
+  const failed = [];
+  if (state.cols.left.userLoaded  && await refreshFile('left')  === 'failed') failed.push('left');
+  if (state.mode === '3way' && state.cols.mid.userLoaded && await refreshFile('mid') === 'failed') failed.push('mid');
+  if (state.cols.right.userLoaded && await refreshFile('right') === 'failed') failed.push('right');
   
   // refreshFile already calls recompute() internally on success,
   // but call it again here to force a refresh even if no file actually changed
   recompute();
-  setStatus('All files reloaded and diff recomputed');
+  if (failed.length) {
+    // Don't overwrite with a success message: tell the user which file(s)
+    // couldn't be reloaded, and that the previously loaded content is kept.
+    const names = failed.map(colLabel).join(', ');
+    const msg = `Re-diff: could not reload ${names} file — it may have been moved or deleted, or the browser can't re-read it. Showing previously loaded content.`;
+    setStatus(msg, true);
+    alert(msg); // status bar alone is easy to miss, so also show a visible notice
+  } else {
+    setStatus('All files reloaded and diff recomputed');
+  }
 });
 
 /* Path bar buttons */
 document.querySelectorAll('.pathrow .filebtns .tbtn').forEach(btn=>{
-  btn.addEventListener('click', ()=>{
+  btn.addEventListener('click', async ()=>{
     const act = btn.dataset.act;
     const col = btn.dataset.col;
     if(act==='undo') undo(col);
     else if(act==='redo') redo(col);
-    else if(act==='refresh') refreshFile(col);
+    else if(act==='refresh'){
+      // Same as Re-diff: besides the red status-bar message, pop up an alert
+      // when the file couldn't be reloaded (moved/deleted/not re-readable).
+      if(await refreshFile(col) === 'failed'){
+        const msg = `Refresh: could not reload ${colLabel(col)} file — it may have been moved or deleted, or the browser can't re-read it. Showing previously loaded content.`;
+        setStatus(msg, true); // status bar shows exactly the same text as the alert
+        alert(msg);
+      }
+    }
     else if(act==='open') openFile(col);
     else if(act==='save') saveFile(col);
   });
