@@ -2355,6 +2355,20 @@ document.getElementById('file-input').addEventListener('change', (e)=>{
   e.target.value = '';
 });
 
+// True on phones/tablets (Android, iPhone, iPad, etc). There's no reliable
+// feature-based way to detect "this platform's Save As picker has no way
+// to cancel", so this checks the device/OS instead: on mobile we skip the
+// File System Access API branch below entirely and go straight to the
+// plain download, matching the "pick a folder each time" flow that
+// desktop users get and the "drops into Downloads" flow mobile users
+// already expect from every other site.
+function isMobileDevice(){
+  if(navigator.userAgentData && typeof navigator.userAgentData.mobile === 'boolean'){
+    return navigator.userAgentData.mobile;
+  }
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+}
+
 async function saveFile(col){
   const text = state.cols[col].text;
   const filename = state.cols[col].fullPath || (col+'.txt');
@@ -2367,7 +2381,11 @@ async function saveFile(col){
   // different folders) hints the browser to remember the last folder for
   // it, and startIn below explicitly reinforces that with our own
   // remembered handle -- see the comment there for why both are used.
-  if(window.showSaveFilePicker){
+  //
+  // On mobile this API's folder-picker screen has no obvious Cancel
+  // button, so it's skipped there in favor of the classic download below,
+  // which lands straight in the phone's normal Downloads folder.
+  if(window.showSaveFilePicker && !isMobileDevice()){
     try{
       const opts = { suggestedName, id: 'diffmerge-save-' + col };
       // The `id` option asks the browser to remember the last folder used
