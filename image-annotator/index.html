@@ -2358,6 +2358,20 @@ async function setLastSaveFileHandle(handle) {
   } catch (err) { /* remembering the folder is a nice-to-have, not critical */ }
 }
 
+// Detect a mobile/touch device (phone or tablet). On these devices,
+// showSaveFilePicker either isn't available or (as seen on some Android
+// builds, e.g. Samsung S22 Chrome) opens a bare file-location screen with no
+// way to cancel out of it if the user changes their mind. So on mobile we
+// always skip that API and go straight to the normal "download to the
+// Downloads folder" flow that phone users expect, even if the API exists.
+const isMobileDevice = (() => {
+  const ua = navigator.userAgent || "";
+  if (/Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(ua)) return true;
+  // iPadOS 13+ reports itself as a Mac, so also check for a touchscreen.
+  if (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1) return true;
+  return false;
+})();
+
 async function exportPNG() {
   if (!baseCanvas) return;
   // Flatten at native resolution, independent of the current on-screen zoom level.
@@ -2369,7 +2383,10 @@ async function exportPNG() {
   render();
   const filename = "annotated-" + Date.now() + ".png";
 
-  if (window.showSaveFilePicker) {
+  // Only use the native "Save As" file picker on desktop browsers that
+  // support it. On mobile devices we skip straight to the plain-download
+  // fallback below (see isMobileDevice comment above).
+  if (!isMobileDevice && window.showSaveFilePicker) {
     // Native "Save As" dialog: lets the user pick any folder, and defaults to
     // wherever they saved to last time.
     const pickerOpts = {
@@ -2391,9 +2408,9 @@ async function exportPNG() {
       // plain-download fallback below so Save still works.
     }
   }
-  // Fallback for browsers without File System Access API support (e.g.
-  // Firefox, Safari): behaves like before, downloading straight to the
-  // browser's default download folder.
+  // Fallback for mobile devices and browsers without File System Access API
+  // support (e.g. Firefox, Safari): downloads straight to the browser/OS's
+  // default Downloads location, matching normal mobile download behavior.
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = filename;
