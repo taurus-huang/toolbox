@@ -412,6 +412,8 @@
     font-size:11px;color:var(--muted);display:flex;justify-content:space-between;flex-shrink:0;
   }
   .statusbar .status-error{color:#e53935;font-weight:600;}
+  .status-right{display:flex;align-items:center;gap:14px;}
+  #cursor-pos{color:var(--muted);white-space:nowrap;}
   .legend{display:flex;gap:14px;align-items:center;}
   .legend span{display:flex;align-items:center;gap:5px;}
   .legend .swatch{width:12px;height:12px;border-radius:2px;display:inline-block;}
@@ -571,7 +573,10 @@
 <!-- ============ STATUS BAR ============ -->
 <div class="statusbar">
   <div class="legend"></div>
-  <div id="status-text">Ready</div>
+  <div class="status-right">
+    <div id="cursor-pos"></div>
+    <div id="status-text">Ready</div>
+  </div>
 </div>
 
 <script>
@@ -1170,7 +1175,33 @@ function updateDiffNavButtonStates(){
   if(prevBtn) prevBtn.disabled = !prevExists;
   if(nextBtn) nextBtn.disabled = !nextExists;
   if(lastBtn) lastBtn.disabled = !nextExists;
+  updateCursorPositionDisplay();
 }
+
+/* Bottom-status-bar "line, char" indicator: shows which line and character
+   (both 1-based, the usual editor convention) the caret currently sits at
+   in whichever pane it's actually focused in -- the "focus" end of the
+   Selection, i.e. where typing would continue, so a dragged selection
+   still shows a sensible position rather than always the earlier end.
+   Called from updateDiffNavButtonStates() (itself already called after
+   every caret-setting operation: clicking into a line via focusin, diff
+   navigation, undo/redo/edit caret restores, ...) and also wired to
+   selectionchange directly below, since moving the caret left/right
+   *within* the same line never re-fires focusin and so wouldn't otherwise
+   be caught. */
+function updateCursorPositionDisplay(){
+  const posEl = document.getElementById('cursor-pos');
+  if(!posEl) return;
+  const sel = window.getSelection();
+  const contentEl = sel && sel.focusNode ? closestContentEl(sel.focusNode) : null;
+  if(!contentEl){ posEl.textContent = ''; return; }
+  const col = contentEl.dataset.col;
+  const lineIdx = parseInt(contentEl.dataset.lineIdx, 10);
+  if(Number.isNaN(lineIdx)){ posEl.textContent = ''; return; }
+  const charOffset = charOffsetInEl(contentEl, sel.focusNode, sel.focusOffset);
+  posEl.textContent = `${colLabel(col)}: Ln ${lineIdx+1}, Col ${charOffset+1}`;
+}
+document.addEventListener('selectionchange', updateCursorPositionDisplay);
 
 function escapeHtml(str){
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
