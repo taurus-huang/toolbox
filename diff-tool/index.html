@@ -162,6 +162,7 @@
     display:flex;align-items:center;justify-content:center;
   }
   .pathrow .swap-btn:hover{background:var(--btn-hover);}
+  .pathrow .swap-btn:disabled{opacity:.4;cursor:default;pointer-events:none;}
 
   /* Main editor area */
   .editor-wrap{flex:1;display:flex;overflow:hidden;position:relative;}
@@ -1100,17 +1101,41 @@ function recompute(opts){
   updateEditButtonStates();
 }
 
-/* Keep the undo/redo buttons in sync: disabled whenever there's nothing
-   to undo/redo for that column (including right after loading a file,
-   since loading resets the history). */
+/* Keep the undo/redo/refresh/save/swap/Re-diff buttons in sync: disabled
+   whenever the action they perform wouldn't have anything to act on yet
+   (including right after loading a file, since loading resets history). */
 function updateEditButtonStates(){
+  let anyLoaded = false;
   ['left','mid','right'].forEach(col=>{
     const c = state.cols[col];
     const undoBtn = document.querySelector(`.tbtn[data-act="undo"][data-col="${col}"]`);
     const redoBtn = document.querySelector(`.tbtn[data-act="redo"][data-col="${col}"]`);
     if(undoBtn) undoBtn.disabled = !c || c.history.length===0;
     if(redoBtn) redoBtn.disabled = !c || c.future.length===0;
+
+    // Refresh (re-read from disk) and Save only make sense once this
+    // column actually has a loaded file to refresh/save.
+    const loaded = !!(c && c.userLoaded);
+    if(loaded) anyLoaded = true;
+    const refreshBtn = document.querySelector(`.tbtn[data-act="refresh"][data-col="${col}"]`);
+    const saveBtn = document.querySelector(`.tbtn[data-act="save"][data-col="${col}"]`);
+    if(refreshBtn) refreshBtn.disabled = !loaded;
+    if(saveBtn) saveBtn.disabled = !loaded;
   });
+
+  // Swap only makes sense once at least one of the two columns it swaps
+  // has a loaded file to swap in.
+  document.querySelectorAll('.swap-btn').forEach(btn=>{
+    const a = state.cols[btn.dataset.swapA];
+    const b = state.cols[btn.dataset.swapB];
+    btn.disabled = !((a && a.userLoaded) || (b && b.userLoaded));
+  });
+
+  // Re-diff only makes sense once at least one column, anywhere, has a
+  // loaded file.
+  const recomputeBtn = document.getElementById('btn-recompute');
+  if(recomputeBtn) recomputeBtn.disabled = !anyLoaded;
+
   updatePaneEmptyHints();
 }
 
