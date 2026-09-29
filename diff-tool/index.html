@@ -3480,10 +3480,34 @@ document.getElementById('editor-wrap').addEventListener('beforeinput', (e)=>{
     }catch(err){ /* point briefly resolved to an invalid range mid-drag; ignore */ }
   }
 
+  /* If (node, offset) isn't inside any line's editable .content -- most
+     commonly because it landed in that line's line-number gutter cell
+     (.num), which sits immediately to the left of .content within the
+     same .line row -- snap it to the start of that line's .content
+     instead. This matters because a drag released past the pane's left
+     edge gets clamped by autoScrollTick below to just inside the pane's
+     own bounding box (rect.left + 1), which is still well within the
+     46px-wide .num column, not .content. Left un-snapped, the resulting
+     caret point sits on plain non-editable text; handing that to
+     setBaseAndExtent silently leaves no contenteditable element focused,
+     so a later Backspace/Delete keydown has nothing valid to target and
+     does nothing at all -- even though window.getSelection() still shows
+     a seemingly valid, non-collapsed selection. */
+  function snapCaretIntoContent(node, offset){
+    if(!node) return null;
+    if(closestContentEl(node)) return {node, offset};
+    const el = node.nodeType === 1 ? node : node.parentElement;
+    const lineEl = el && el.closest('.line');
+    const contentEl = lineEl && lineEl.querySelector('.content[contenteditable="true"]');
+    return contentEl ? {node: contentEl, offset: 0} : null;
+  }
+
   function extendTo(x, y){
     const caret = caretFromPoint(x, y);
     if(!caret) return;
-    extendToPoint(caret.node, caret.offset);
+    const snapped = snapCaretIntoContent(caret.node, caret.offset);
+    if(!snapped) return;
+    extendToPoint(snapped.node, snapped.offset);
   }
 
   /* Whether (x,y) falls inside the current (possibly cross-line) selection.
