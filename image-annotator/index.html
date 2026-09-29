@@ -666,6 +666,7 @@
     <div class="tool" data-tool="triangle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4l9 16H3z" stroke-linejoin="round"/></svg><span class="tip">Triangle</span></div>
     <div class="tool" data-tool="line"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="20" x2="20" y2="4"/></svg><span class="tip">Line</span></div>
     <div class="tool" data-tool="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="20" x2="20" y2="4"/><polyline points="10 4 20 4 20 14"/></svg><span class="tip">Arrow</span></div>
+    <div class="tool" data-tool="pen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16c2.5-9 5-9 6.5-4.5S13 17 15 11s3-5 6-3"/></svg><span class="tip">Freehand</span></div>
     <div class="tool" data-tool="text"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg><span class="tip">Text</span></div>
     <div class="tool" data-tool="number"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><text x="12" y="16" font-size="10" text-anchor="middle" fill="currentColor" stroke="none">1</text></svg><span class="tip">Numbered Marker</span></div>
     <div class="tool" data-tool="highlighter"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg><span class="tip">Highlighter</span></div>
@@ -753,7 +754,7 @@ function rotatePt(x, y, deg) {
   const r = deg2rad(deg), c = Math.cos(r), s = Math.sin(r);
   return { x: x * c - y * s, y: x * s + y * c };
 }
-const isBox = (t) => ["rect", "roundRect", "ellipse", "triangle", "highlighter", "text", "number", "image"].includes(typeof t === "string" ? t : t && t.type);
+const isBox = (t) => ["rect", "roundRect", "ellipse", "triangle", "highlighter", "text", "number", "image", "pen"].includes(typeof t === "string" ? t : t && t.type);
 const isSeg = (t) => ["line", "arrow"].includes(typeof t === "string" ? t : t && t.type);
 function boxCenter(o) { return { x: o.x + o.w / 2, y: o.y + o.h / 2 }; }
 
@@ -1021,7 +1022,7 @@ function drawObject(o) {
     // digit shape), so when the whole image was mirrored/flipped, reflect their
     // drawn content too, in addition to the position/rotation handled in
     // transformImage(). Symmetric shapes (rect, ellipse, etc.) don't need this.
-    if (o.type === "triangle" || o.type === "text" || o.type === "number") {
+    if (o.type === "triangle" || o.type === "text" || o.type === "number" || o.type === "pen") {
       if (o.flipX) { ctx.translate(w, 0); ctx.scale(-1, 1); }
       if (o.flipY) { ctx.translate(0, h); ctx.scale(1, -1); }
     }
@@ -1053,6 +1054,8 @@ function drawObject(o) {
       drawNumber(o, w, h);
     } else if (o.type === "image") {
       drawImageObject(o, w, h);
+    } else if (o.type === "pen") {
+      drawPen(o, w, h);
     }
   } else if (isSeg(o)) {
     ctx.lineWidth = o.strokeWidth;
@@ -1077,6 +1080,107 @@ function drawObject(o) {
     drawLineCap(o.x2, o.y2, ang, o.endCap, o.strokeWidth);
   }
   ctx.restore();
+}
+
+// ---------- Freehand (pen) objects ----------
+// A pen object is stored like a box (x, y, w, h, rotation) so it can be moved,
+// resized and rotated with the usual handles. Its points are kept normalised
+// (0..1) relative to that box in o.pts = [[nx, ny], ...].
+function penPoints(o, w, h) { return (o.pts || []).map((q) => [q[0] * w, q[1] * h]); }
+function fitPen(o, raw) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of raw) { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; }
+  const w = Math.max(maxX - minX, 1), h = Math.max(maxY - minY, 1);
+  o.x = minX; o.y = minY; o.w = w; o.h = h;
+  const r4 = (v) => Math.round(v * 10000) / 10000;
+  o.pts = raw.map((p) => [r4((p.x - minX) / w), r4((p.y - minY) / h)]);
+}
+function addPenPoint(act, p) {
+  const last = act.raw[act.raw.length - 1];
+  if (Math.hypot(p.x - last.x, p.y - last.y) < 1.5 * currentScale()) return;
+  act.raw.push({ x: p.x, y: p.y });
+  fitPen(act.o, act.raw);
+}
+function distToPen(o, l) {
+  const P = penPoints(o, o.w, o.h);
+  if (!P.length) return Infinity;
+  if (P.length === 1) return Math.hypot(l.x - P[0][0], l.y - P[0][1]);
+  let best = Infinity;
+  for (let i = 0; i < P.length - 1; i++) {
+    const ax = P[i][0], ay = P[i][1], bx = P[i + 1][0], by = P[i + 1][1];
+    const dx = bx - ax, dy = by - ay, len = dx * dx + dy * dy;
+    let t = len ? ((l.x - ax) * dx + (l.y - ay) * dy) / len : 0;
+    t = Math.max(0, Math.min(1, t));
+    best = Math.min(best, Math.hypot(l.x - (ax + t * dx), l.y - (ay + t * dy)));
+  }
+  return best;
+}
+// Shorten a polyline by ds at its start and de at its end (so arrowheads don't
+// have the shaft poking through their tips, same idea as capInset for lines).
+function trimPolyline(P, ds, de) {
+  const cut = (arr, d) => {
+    let rem = d;
+    while (arr.length > 1 && rem > 0) {
+      const a = arr[arr.length - 2], b = arr[arr.length - 1];
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (L > rem) { const t = rem / L; arr[arr.length - 1] = [b[0] + (a[0] - b[0]) * t, b[1] + (a[1] - b[1]) * t]; return; }
+      rem -= L; arr.pop();
+    }
+  };
+  const A = P.map((q) => q.slice());
+  if (de > 0) cut(A, de);
+  A.reverse();
+  if (ds > 0) cut(A, ds);
+  A.reverse();
+  return A;
+}
+// Direction the stroke is heading at its start/end, measured over a short span
+// so tiny mouse jitter doesn't make the cap wobble.
+function penEndAngle(P, atStart, span) {
+  const n = P.length;
+  const tip = atStart ? P[0] : P[n - 1];
+  let acc = 0;
+  for (let k = 1; k < n; k++) {
+    const q = atStart ? P[k] : P[n - 1 - k];
+    acc = Math.hypot(q[0] - tip[0], q[1] - tip[1]);
+    if (acc >= span || k === n - 1) {
+      if (acc === 0) return 0;
+      return Math.atan2(tip[1] - q[1], tip[0] - q[0]);
+    }
+  }
+  return 0;
+}
+function drawPen(o, w, h) {
+  const P = penPoints(o, w, h);
+  if (!P.length) return;
+  const sw = o.strokeWidth;
+  ctx.lineWidth = sw;
+  ctx.strokeStyle = o.stroke;
+  ctx.fillStyle = o.stroke;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  if (P.length === 1) {
+    ctx.beginPath(); ctx.arc(P[0][0], P[0][1], Math.max(sw, 1) / 2, 0, Math.PI * 2); ctx.fill();
+    return;
+  }
+  const Q = trimPolyline(P, capInset(o.startCap, sw), capInset(o.endCap, sw));
+  if (Q.length > 1 && sw > 0) {
+    ctx.setLineDash(lineDashArray(o.lineStyle, sw));
+    ctx.beginPath();
+    ctx.moveTo(Q[0][0], Q[0][1]);
+    if (Q.length === 2) ctx.lineTo(Q[1][0], Q[1][1]);
+    else {
+      for (let i = 1; i < Q.length - 1; i++) {
+        ctx.quadraticCurveTo(Q[i][0], Q[i][1], (Q[i][0] + Q[i + 1][0]) / 2, (Q[i][1] + Q[i + 1][1]) / 2);
+      }
+      ctx.lineTo(Q[Q.length - 1][0], Q[Q.length - 1][1]);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  const span = Math.max(8, sw * 2);
+  drawLineCap(P[0][0], P[0][1], penEndAngle(P, true, span), o.startCap, sw);
+  drawLineCap(P[P.length - 1][0], P[P.length - 1][1], penEndAngle(P, false, span), o.endCap, sw);
 }
 
 function lineDashArray(style, sw) {
@@ -1305,6 +1409,7 @@ function hitObject(p) {
     const o = state.objects[i];
     if (isBox(o)) {
       const l = worldToLocal(o, p);
+      if (o.type === "pen") { if (distToPen(o, l) <= Math.max(8, o.strokeWidth + 4)) return o; continue; }
       const pad = Math.max(8, o.strokeWidth);
       if (l.x >= -pad && l.x <= o.w + pad && l.y >= -pad && l.y <= o.h + pad) return o;
     } else if (isSeg(o)) {
@@ -1381,6 +1486,9 @@ function createObject(tool, p) {
   if (tool === "highlighter") {
     return { ...base, x: p.x, y: p.y, w: 0, h: 0, radius: r.radius ?? 0, fill: r.fill ?? "#ffff00", stroke: r.stroke ?? "#ffff00", filled: true, strokeWidth: r.strokeWidth ?? 0 };
   }
+  if (tool === "pen") {
+    return { ...base, x: p.x, y: p.y, w: 1, h: 1, pts: [[0, 0]], lineStyle: r.lineStyle ?? "solid", startCap: r.startCap ?? "none", endCap: r.endCap ?? "none" };
+  }
   if (isSeg(tool)) {
     return { ...base, x1: p.x, y1: p.y, x2: p.x, y2: p.y, lineStyle: r.lineStyle ?? "solid", startCap: r.startCap ?? "none", endCap: r.endCap ?? (tool === "arrow" ? "arrow" : "none") };
   }
@@ -1415,7 +1523,7 @@ canvas.addEventListener("mousedown", (e) => {
     const h = hitHandle(sel, p);
     if (h) { startTransform(sel, h, p); return; }
   }
-  const hit = hitObject(p);
+  const hit = state.tool === "pen" ? null : hitObject(p);
   const ctrlKey = e.ctrlKey || e.metaKey;
   if (hit) {
     // Clicking an existing object always selects (and lets you drag) it,
@@ -1453,6 +1561,7 @@ canvas.addEventListener("mousedown", (e) => {
       if (o.type === "text") setTimeout(() => { const t = document.getElementById("prop-text"); if (t) { t.focus(); t.select(); } }, 30);
     } else {
       action = { mode: "create", o, start: p, orig: JSON.parse(JSON.stringify(o)) };
+      if (o.type === "pen") action.raw = [{ x: p.x, y: p.y }];
       render(); buildProps();
     }
   }
@@ -1496,7 +1605,9 @@ window.addEventListener("mousemove", (e) => {
   const o = action.o, orig = action.orig;
 
   if (action.mode === "create") {
-    if (isSeg(o.type)) {
+    if (o.type === "pen") {
+      addPenPoint(action, p);
+    } else if (isSeg(o.type)) {
       o.x2 = p.x; o.y2 = p.y;
       if (e.shiftKey) { const a = Math.atan2(o.y2 - o.y1, o.x2 - o.x1); const snap = Math.round(a / (Math.PI/4)) * (Math.PI/4); const len = Math.hypot(o.x2-o.x1,o.y2-o.y1); o.x2 = o.x1 + len*Math.cos(snap); o.y2 = o.y1 + len*Math.sin(snap); }
     } else {
@@ -1578,7 +1689,9 @@ window.addEventListener("mouseup", (e) => {
   }
   const o = action.o;
   if (action.mode === "create") {
-    if (isSeg(o.type)) {
+    if (o.type === "pen") {
+      if (action.raw.length < 2) { state.objects.pop(); selectOnly(null); }
+    } else if (isSeg(o.type)) {
       if (Math.hypot(o.x2 - o.x1, o.y2 - o.y1) < 5) { state.objects.pop(); selectOnly(null); }
     } else if (o.w < 5 && o.h < 5) {
       // click without drag -> default size
@@ -1605,7 +1718,7 @@ function updateCursor(e) {
 // ---------- Properties panel ----------
 const propsEmpty = document.getElementById("propsEmpty");
 const propsContent = document.getElementById("propsContent");
-const typeNames = { rect: "Rectangle", roundRect: "Rounded Rectangle", ellipse: "Ellipse", triangle: "Triangle", line: "Line", arrow: "Arrow", highlighter: "Highlighter", text: "Text", number: "Numbered Marker", image: "Image" };
+const typeNames = { rect: "Rectangle", roundRect: "Rounded Rectangle", ellipse: "Ellipse", triangle: "Triangle", line: "Line", arrow: "Arrow", pen: "Freehand", highlighter: "Highlighter", text: "Text", number: "Numbered Marker", image: "Image" };
 
 function buildProps() {
   if (state.selectedIds.length > 1) {
@@ -1647,6 +1760,14 @@ function buildProps() {
     html += selectField("lineStyle", "Line Style", o.lineStyle || "solid", [["solid","Solid"],["dashed","Dashed"],["dotted","Dotted"],["dashdot","Dash-Dot"],["longdash","Long Dash"]]);
     html += selectField("startCap", "Start Cap", o.startCap || "none", [["none","None"],["arrow","Arrow"],["circle","Circle"],["square","Square"]]);
     html += selectField("endCap", "End Cap", o.endCap || "none", [["none","None"],["arrow","Arrow"],["circle","Circle"],["square","Square"]]);
+    html += rangeField("opacity", "Opacity", o.opacity == null ? 100 : o.opacity, 0, 100, 1, "%");
+    html += rangeField("strokeWidth", "Line Width", o.strokeWidth, 0, 40, 1, "px");
+  } else if (o.type === "pen") {
+    html += colorField("stroke", "Line Color", o.stroke);
+    html += selectField("lineStyle", "Line Style", o.lineStyle || "solid", [["solid","Solid"],["dashed","Dashed"],["dotted","Dotted"],["dashdot","Dash-Dot"],["longdash","Long Dash"]]);
+    html += selectField("startCap", "Start Cap", o.startCap || "none", [["none","None"],["arrow","Arrow"],["circle","Circle"],["square","Square"]]);
+    html += selectField("endCap", "End Cap", o.endCap || "none", [["none","None"],["arrow","Arrow"],["circle","Circle"],["square","Square"]]);
+    html += rangeField("rotation", "Rotation", o.rotation || 0, -180, 180, 1, "°");
     html += rangeField("opacity", "Opacity", o.opacity == null ? 100 : o.opacity, 0, 100, 1, "%");
     html += rangeField("strokeWidth", "Line Width", o.strokeWidth, 0, 40, 1, "px");
   } else if (o.type === "text") {
@@ -1701,6 +1822,10 @@ function objLabel(o, idx) {
     const styleName = lineStyleNames[o.lineStyle || "solid"] || "Solid";
     const hasArrow = o.startCap === "arrow" || o.endCap === "arrow";
     return `${idx}. Line: ${styleName}${hasArrow ? " Arrow" : ""}`;
+  }
+  if (o.type === "pen") {
+    const lineStyleNames = { solid: "Solid", dashed: "Dashed", dotted: "Dotted", dashdot: "Dash-Dot", longdash: "Long Dash" };
+    return `${idx}. Freehand: ${lineStyleNames[o.lineStyle || "solid"] || "Solid"}`;
   }
   return `${idx}. ${typeNames[o.type] || o.type}`;
 }
@@ -2648,7 +2773,7 @@ window.addEventListener("keydown", (e) => {
     e.preventDefault();
     deleteSelected();
   }
-  const map = { v:"select", r:"rect", o:"ellipse", l:"line", a:"arrow", h:"highlighter", t:"text", n:"number" };
+  const map = { v:"select", r:"rect", o:"ellipse", l:"line", a:"arrow", h:"highlighter", t:"text", n:"number", p:"pen" };
   if (map[e.key.toLowerCase()]) { state.tool = map[e.key.toLowerCase()]; updateToolUI(); canvas.style.cursor = "crosshair"; }
   // arrow-key nudge (moves every selected object together)
   if (state.selectedIds.length && ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
