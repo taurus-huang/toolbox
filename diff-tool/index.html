@@ -2718,6 +2718,28 @@ function setupScrollSync(){
   const ids = ['scroll-left','scroll-mid','scroll-right'];
   const idToCol = id => id.slice('scroll-'.length);
 
+  /* Which diff block (if any) the caret currently "belongs to": the block
+     whose own row range contains the caret's row in its actual column, or
+     -- for a block that is a pure insertion/deletion as seen from that
+     column (no real line of its own anywhere in the block -- see
+     firstRealRowInBlock) -- a block the caret sits immediately above or
+     below, since there's nowhere "inside" it to literally place a caret
+     in that column. Used below to narrow proportional scroll alignment
+     down to just that one block when the user is focused on it (see the
+     'scroll' listener). Returns null if the caret hasn't been placed
+     anywhere yet, or sits on an unchanged line with no adjacent gap. */
+  function findFocusedBlockIndex(){
+    if(state.cursorRow === null || state.cursorRow === undefined) return null;
+    const col = state.cursorCol || 'left';
+    const row = state.cursorRow;
+    for(let i=0;i<state.diffBlocks.length;i++){
+      const b = state.diffBlocks[i];
+      if(row >= b.start && row <= b.end) return i;
+      if(firstRealRowInBlock(b, col) === null && (row === b.start-1 || row === b.end+1)) return i;
+    }
+    return null;
+  }
+
   // Step 2: among all diff blocks, which ones currently sit inside this
   // column's visible area (VisibleAreaLines worth of rows, i.e. its own
   // viewport) -- any block whose pixel span overlaps [viewTop, viewBottom]
@@ -2779,9 +2801,21 @@ function setupScrollSync(){
       // window -- lining up the *set* of diff blocks currently on screen
       // between columns, proportionally, rather than any single row.
       const range = visibleBlockIndexRange(srcCol, top, top + e.target.clientHeight);
+      // If the caret currently belongs to one specific diff block (see
+      // findFocusedBlockIndex above) and that block is part of the
+      // visible run just computed, narrow proportional alignment down to
+      // just that block's own top/bottom span instead of the whole
+      // visible run -- so scrolling stays anchored to the block the user
+      // is actually focused on, rather than drifting proportionally with
+      // whatever else happens to be on screen alongside it. Otherwise,
+      // fall back to the default whole-visible-run behavior as before.
+      const focusedIdx = findFocusedBlockIndex();
+      const effectiveRange = (range && focusedIdx !== null && focusedIdx >= range.idxMin && focusedIdx <= range.idxMax)
+        ? {idxMin: focusedIdx, idxMax: focusedIdx}
+        : range;
       let frac = null;
-      if(range){
-        const srcWindow = diffRangeWindow(srcCol, range.idxMin, range.idxMax, e.target.clientHeight);
+      if(effectiveRange){
+        const srcWindow = diffRangeWindow(srcCol, effectiveRange.idxMin, effectiveRange.idxMax, e.target.clientHeight);
         frac = srcWindow.rangePixels > 0
           ? Math.max(0, Math.min(1, (top - srcWindow.windowTop) / srcWindow.rangePixels))
           : 0;
@@ -2793,8 +2827,8 @@ function setupScrollSync(){
           if(!el.closest('.pane').classList.contains('hidden')){
             const otherCol = idToCol(other);
             let newTop;
-            if(range){
-              const otherWindow = diffRangeWindow(otherCol, range.idxMin, range.idxMax, el.clientHeight);
+            if(effectiveRange){
+              const otherWindow = diffRangeWindow(otherCol, effectiveRange.idxMin, effectiveRange.idxMax, el.clientHeight);
               newTop = otherWindow.windowTop + frac*otherWindow.rangePixels;
             } else {
               newTop = offsetForRow(otherCol, row) + remainder;
