@@ -166,7 +166,7 @@
     box-shadow: 0 8px 40px rgba(0,0,0,.5);
     margin: 32px;
   }
-  #canvas { display: block; background: transparent; }
+  #canvas { display: block; background: transparent; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   #canvas.empty { display: none; }
 
   .empty-state {
@@ -1503,8 +1503,47 @@ let action = null; // {mode, o, start, orig, handle}
 
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
-canvas.addEventListener("mousedown", (e) => {
+// ---- Touch support ----
+// Mouse, pen and finger input all go through Pointer Events. One finger acts
+// like the left mouse button (draw / select / drag); two fingers pan the view
+// (the touch equivalent of right-button drag).
+const activeTouches = new Map(); // pointerId -> {x, y}
+function touchCentroid() {
+  let sx = 0, sy = 0;
+  activeTouches.forEach((t) => { sx += t.x; sy += t.y; });
+  return { x: sx / activeTouches.size, y: sy / activeTouches.size };
+}
+function cancelCurrentAction() {
+  // Called when a second finger lands: undo whatever the first finger had begun.
+  if (!action) return;
+  if (action.mode === "create") {
+    const i = state.objects.indexOf(action.o);
+    if (i >= 0) state.objects.splice(i, 1);
+    selectOnly(null);
+  } else if (action.mode === "move") {
+    for (const item of action.objs) Object.assign(item.o, JSON.parse(JSON.stringify(item.orig)));
+  } else if (action.o && action.orig) {
+    Object.assign(action.o, JSON.parse(JSON.stringify(action.orig)));
+  }
+  action = null;
+  buildProps(); render();
+}
+
+canvas.addEventListener("pointerdown", (e) => {
   if (!baseCanvas) return; // safety guard; a blank canvas is created on load
+  if (e.pointerType === "touch") {
+    activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (activeTouches.size >= 2) {
+      cancelCurrentAction();
+      const stageEl = document.getElementById("stage");
+      const c = touchCentroid();
+      action = { mode: "pan", touch: true, startClientX: c.x, startClientY: c.y, scrollLeft: stageEl.scrollLeft, scrollTop: stageEl.scrollTop };
+      return;
+    }
+  } else if (e.pointerType === "mouse" && e.button !== 0 && e.button !== 2) {
+    return;
+  }
+  e.preventDefault();
   if (e.button === 2) {
     // Right mouse button always pans the view, regardless of the active tool,
     // so left-click stays free for marquee-select / drawing / moving objects.
@@ -1571,7 +1610,20 @@ function startTransform(o, h, p) {
   action = { mode: h.type, o, start: p, orig: JSON.parse(JSON.stringify(o)), handle: h };
 }
 
-window.addEventListener("mousemove", (e) => {
+window.addEventListener("pointermove", (e) => {
+  if (e.pointerType === "touch") {
+    if (!activeTouches.has(e.pointerId)) return;
+    activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (action && action.mode === "pan" && action.touch) {
+      const stageEl = document.getElementById("stage");
+      const c = touchCentroid();
+      stageEl.scrollLeft = action.scrollLeft - (c.x - action.startClientX);
+      stageEl.scrollTop = action.scrollTop - (c.y - action.startClientY);
+      e.preventDefault();
+      return;
+    }
+    if (activeTouches.size > 1) return;
+  }
   if (action && action.mode === "pan") {
     const stageEl = document.getElementById("stage");
     stageEl.scrollLeft = action.scrollLeft - (e.clientX - action.startClientX);
@@ -1666,7 +1718,23 @@ function resizeBox(o, orig, h, p, shift) {
   o.x = ncx - nw / 2; o.y = ncy - nh / 2;
 }
 
-window.addEventListener("mouseup", (e) => {
+function onPointerEnd(e) {
+  if (e.pointerType === "touch") activeTouches.delete(e.pointerId);
+  if (!action) return;
+  if (action.mode === "pan" && action.touch) {
+    // Pan ends as soon as one of the two fingers lifts.
+    action = null;
+    return;
+  }
+  if (e.type === "pointercancel" && action.mode !== "pan" && action.mode !== "marquee") {
+    cancelCurrentAction();
+    return;
+  }
+  finishAction(e);
+}
+window.addEventListener("pointerup", onPointerEnd);
+window.addEventListener("pointercancel", onPointerEnd);
+function finishAction(e) {
   if (!action) return;
   if (action.mode === "pan") {
     action = null;
@@ -1704,7 +1772,7 @@ window.addEventListener("mouseup", (e) => {
   action = null;
   pushHistory();
   render(); buildProps();
-});
+}
 
 function updateCursor(e) {
   if (!baseCanvas) { canvas.style.cursor = "crosshair"; return; }
