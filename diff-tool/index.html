@@ -139,10 +139,16 @@
     flex:1;background:var(--input-bg);border:1px solid var(--border);color:var(--text);
     padding:4px 6px;border-radius:3px;font-size:12px;min-width:0;
   }
-  /* Read-only path row style: use gray background */
+  /* Read-only path row style: grayed-out ("disabled") look -- dimmer
+     background, muted/lower-contrast text, and a plain (not text-select)
+     cursor -- so it visually reads as "can't be typed into", matching how
+     disabled form fields normally look, even though this filename field
+     uses readonly rather than disabled (disabled inputs can't be
+     clicked/selected for copying, which this field still allows). */
   .pathrow input[type=text][readonly]{
     background:var(--input-readonly-bg);
-    cursor:text;
+    color:var(--muted);
+    cursor:default;
   }
   .pathrow .filebtns{display:flex;gap:2px;flex-shrink:0;}
   .pathrow .filebtns .tbtn{padding:4px 7px;}
