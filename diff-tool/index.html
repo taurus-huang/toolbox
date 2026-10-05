@@ -16,6 +16,7 @@
     --panel:#ffffff;
     --toolbar:#e4e6ea;
     --border:#c8cad0;
+    --btn-border:#9a9da6;
     --text:#1e1f22;
     --muted:#6b6e76;
     --accent:#2570c2;
@@ -42,12 +43,14 @@
     --checkbox-bg:#c8cad0;
     --checkbox-text:#1e1f22;
     --current-line-bg:rgba(37,112,194,0.08);
+    --accent-soft:rgba(37,112,194,0.12);
   }
   html[data-theme="dark"]{
     --bg:#1F222A;
     --panel:#101115;
     --toolbar:#181A20;
     --border:#3d3e44;
+    --btn-border:#6b6d76;
     --text:#e7e8ec;
     --muted:#9a9da6;
     --accent:#3b82f6;
@@ -74,6 +77,7 @@
     --checkbox-bg:#3a3b41;
     --checkbox-text:#e7e8ec;
     --current-line-bg:rgba(59,130,246,0.16);
+    --accent-soft:rgba(59,130,246,0.15);
   }
   *{box-sizing:border-box;}
   html,body{height:100%;margin:0;font-family:"Segoe UI","Microsoft JhengHei",sans-serif;background:var(--bg);color:var(--text);font-size:13px;}
@@ -91,20 +95,29 @@
      the old 6px + 4px gap + 6px was uneven, 6px left vs 10px right.) */
   .toolbar .group{display:flex;gap:2px;align-items:center;padding:0 8px;border-right:1px solid var(--border);}
   .toolbar .group:last-child{border-right:none;}
+  /* Icon-only toolbar buttons: flat background, thin border, no visible
+     text -- the button's purpose is conveyed by its icon shape alone, with
+     the full description available as the native title-attribute tooltip
+     on hover (same approach as a plain, un-styled browser tooltip, no
+     custom tooltip element needed). Hover adds an accent-colored border on
+     top of the usual background change, so a hovered icon button reads as
+     clearly interactive even though there's no label text to change.
+     Border uses the dedicated --btn-border (not the general-purpose
+     --border used for panel/row divider lines) because --border sits too
+     close in tone to --btn-bg, especially in dark mode where the two are
+     nearly indistinguishable -- so a button's resting-state outline would
+     otherwise barely read as a border at all. */
   .tbtn{
-    background:var(--btn-bg);border:1px solid var(--border);color:var(--text);
-    padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px;
-    display:flex;align-items:center;gap:5px;white-space:nowrap;
-    transition:background .12s;
+    background:var(--btn-bg);border:1px solid var(--btn-border);color:var(--text);
+    width:32px;height:32px;padding:0;border-radius:6px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;flex-shrink:0;
+    transition:background .12s,border-color .12s;
   }
-  .tbtn:not(:disabled):hover{background:var(--btn-hover);}
-  .tbtn:not(:disabled):active{background:var(--accent);}
-  .tbtn.active{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .tbtn:not(:disabled):hover{background:var(--btn-hover);border-color:var(--accent);}
+  .tbtn:not(:disabled):active{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .tbtn.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}
   .tbtn:disabled{opacity:.4;cursor:default;pointer-events:none;}
-  .tbtn .ico{font-size:14px;line-height:1;}
-  .tbtn svg{width:20px;height:20px;flex-shrink:0;display:block;}
-  .tbtn svg.icon-lg{width:23px;height:23px;}
-  .pathrow .swap-btn svg{width:20px;height:20px;display:block;}
+  .tbtn svg{width:18px;height:18px;flex-shrink:0;display:block;}
   .actbtn svg{width:18px;height:18px;display:block;}
 
   /* Path bar */
@@ -151,7 +164,6 @@
     cursor:default;
   }
   .pathrow .filebtns{display:flex;gap:2px;flex-shrink:0;}
-  .pathrow .filebtns .tbtn{padding:4px 7px;}
   /* This cell IS the visual divider strip between two column cells -- its
      own left/right borders are the sole boundary line (col-label no longer
      draws one, to avoid a doubled-up line right next to this). Widened so
@@ -163,12 +175,14 @@
     display:flex;align-items:center;justify-content:center;
   }
   .pathrow .swap-btn{
-    background:var(--btn-bg);border:1px solid var(--border);color:var(--text);
-    border-radius:4px;cursor:pointer;font-size:13px;padding:4px 7px;
+    background:var(--btn-bg);border:1px solid var(--btn-border);color:var(--text);
+    width:32px;height:32px;padding:0;border-radius:6px;cursor:pointer;
     display:flex;align-items:center;justify-content:center;
+    transition:background .12s,border-color .12s;
   }
-  .pathrow .swap-btn:hover{background:var(--btn-hover);}
+  .pathrow .swap-btn:not(:disabled):hover{background:var(--btn-hover);border-color:var(--accent);}
   .pathrow .swap-btn:disabled{opacity:.4;cursor:default;pointer-events:none;}
+  .pathrow .swap-btn svg{width:18px;height:18px;display:block;}
 
   /* Main editor area */
   .editor-wrap{flex:1;display:flex;overflow:hidden;position:relative;}
@@ -330,13 +344,18 @@
   /* Shared merge-button look. Used by the connector-strip buttons (see
      .connector-actions above) -- the buttons themselves used to live
      inline at the right edge of each line, but the class/appearance is
-     unchanged, only where it's mounted moved. */
+     unchanged, only where it's mounted moved. Same flat background/border/
+     hover-accent-border treatment as the other icon-only toolbar buttons
+     (see .tbtn / .pathrow .swap-btn), just scaled down to fit this 18px
+     slot in the narrow connector strip. */
   .actbtn{
-    width:18px;height:18px;border-radius:3px;background:transparent;border:none;
-    color:var(--checkbox-text);display:flex;align-items:center;justify-content:center;font-size:11px;
+    width:18px;height:18px;border-radius:4px;
+    background:var(--btn-bg);border:1px solid var(--btn-border);color:var(--text);
+    display:flex;align-items:center;justify-content:center;
     cursor:pointer;line-height:1;padding:0;
+    transition:background .12s,border-color .12s;
   }
-  .actbtn:hover{filter:brightness(1.15);}
+  .actbtn:hover{background:var(--btn-hover);border-color:var(--accent);}
 
   /* Gutter (between panes) showing overview diff markers - fixed minimap */
   .gutter{
@@ -489,23 +508,22 @@
 <!-- ============ TOP TOOLBAR ============ -->
 <div class="toolbar">
   <div class="group">
-    <button class="tbtn active" id="btn-2way" title="2-way compare"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><rect x="5" y="6" width="14" height="12" rx="1.5" fill="none" stroke="#fff" stroke-width="1.8"/><line x1="12" y1="6" x2="12" y2="18" stroke="#fff" stroke-width="1.8"/></svg> 2-way</button>
-    <button class="tbtn" id="btn-3way" title="3-way compare"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><rect x="4" y="6" width="16" height="12" rx="1.5" fill="none" stroke="#fff" stroke-width="1.8"/><line x1="9.3" y1="6" x2="9.3" y2="18" stroke="#fff" stroke-width="1.8"/><line x1="14.7" y1="6" x2="14.7" y2="18" stroke="#fff" stroke-width="1.8"/></svg> 3-way</button>
+    <button class="tbtn active" id="btn-2way" title="2-way compare"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="5" width="16" height="14" rx="1.5"/><line x1="12" y1="5" x2="12" y2="19"/></svg></button>
+    <button class="tbtn" id="btn-3way" title="3-way compare"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="1.5"/><line x1="9" y1="5" x2="9" y2="19"/><line x1="15" y1="5" x2="15" y2="19"/></svg></button>
   </div>
   <div class="group">
-    <button class="tbtn" id="nav-first" title="First difference"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><rect x="6" y="5.9" width="12" height="2.2" fill="#fff"/><polygon points="12,8.1 17.5,18.1 6.5,18.1" fill="#fff"/></svg> First</button>
-    <button class="tbtn" id="nav-prev" title="Previous difference"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><polygon points="12,6.5 17.5,15.5 6.5,15.5" fill="#fff"/></svg> Prev</button>
-    <button class="tbtn" id="nav-next" title="Next difference"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><polygon points="12,17.5 6.5,8.5 17.5,8.5" fill="#fff"/></svg> Next</button>
-    <button class="tbtn" id="nav-last" title="Last difference"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><polygon points="12,15.9 6.5,5.9 17.5,5.9" fill="#fff"/><rect x="6" y="15.9" width="12" height="2.2" fill="#fff"/></svg> Last</button>
+    <button class="tbtn" id="nav-first" title="First difference"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 17 12 11 18 17"/><polyline points="6 11 12 5 18 11"/></svg></button>
+    <button class="tbtn" id="nav-prev" title="Previous difference"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
+    <button class="tbtn" id="nav-next" title="Next difference"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+    <button class="tbtn" id="nav-last" title="Last difference"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 7 12 13 18 7"/><polyline points="6 13 12 19 18 13"/></svg></button>
   </div>
   <div class="group">
-    <button class="tbtn" id="btn-recompute" title="Re-run diff"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><path fill="#fff" d="M17.65,6.35C16.2,4.9,14.21,4,12,4c-4.42,0-7.99,3.58-7.99,8s3.57,8,7.99,8c3.73,0,6.84-2.55,7.73-6h-2.08c-0.82,2.33-3.04,4-5.65,4c-3.31,0-6-2.69-6-6s2.69-6,6-6c1.66,0,3.14,0.69,4.22,1.78L13,11h7V4L17.65,6.35z"/></svg> Re-diff</button>
+    <button class="tbtn" id="btn-recompute" title="Re-run diff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
   </div>
   <div class="group" style="margin-left:auto;border-right:none;">
     <button class="tbtn" id="btn-theme" title="Toggle light / dark mode">
-      <svg id="icon-theme-sun" viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><circle cx="12" cy="12" r="4" fill="#fff"/><g stroke="#fff" stroke-width="1.8" stroke-linecap="round"><line x1="12" y1="2.8" x2="12" y2="5.3"/><line x1="12" y1="18.7" x2="12" y2="21.2"/><line x1="2.8" y1="12" x2="5.3" y2="12"/><line x1="18.7" y1="12" x2="21.2" y2="12"/><line x1="5.4" y1="5.4" x2="7.2" y2="7.2"/><line x1="16.8" y1="16.8" x2="18.6" y2="18.6"/><line x1="5.4" y1="18.6" x2="7.2" y2="16.8"/><line x1="16.8" y1="7.2" x2="18.6" y2="5.4"/></g></svg>
-      <svg id="icon-theme-moon" viewBox="0 0 24 24" style="display:none;"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><circle cx="12" cy="12" r="7" fill="#fff"/><circle cx="15" cy="9" r="6" fill="#739EEB"/></svg>
-      <span id="theme-label">Light</span>
+      <svg id="icon-theme-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/><line x1="4" y1="12" x2="2" y2="12"/><line x1="22" y1="12" x2="20" y2="12"/><line x1="4.9" y1="4.9" x2="3.5" y2="3.5"/><line x1="20.5" y1="20.5" x2="19.1" y2="19.1"/><line x1="4.9" y1="19.1" x2="3.5" y2="20.5"/><line x1="20.5" y1="3.5" x2="19.1" y2="4.9"/></svg>
+      <svg id="icon-theme-moon" viewBox="0 0 24 24" style="display:none;" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
     </button>
   </div>
 </div>
@@ -516,40 +534,40 @@
     <div class="col-label" id="pathcol-left">
       <input type="text" id="path-left" placeholder="Left file" readonly>
       <div class="filebtns">
-        <button class="tbtn" data-act="undo" data-col="left" title="Undo"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><path fill="#fff" d="M12.5,8C9.85,8,7.45,8.99,5.6,10.6L2,7v9h9l-3.62-3.62c1.39-1.16,3.16-1.88,5.12-1.88c3.54,0,6.55,2.31,7.6,5.5l2.37-0.78C21.08,11.03,17.15,8,12.5,8z"/></svg></button>
-        <button class="tbtn" data-act="redo" data-col="left" title="Redo"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><path fill="#fff" d="M18.4,10.6C16.55,8.99,14.15,8,11.5,8c-4.65,0-8.58,3.03-9.96,7.22L3.9,16C4.95,12.81,7.95,10.5,11.5,10.5c1.95,0,3.73,0.72,5.12,1.88L13,16h9V7L18.4,10.6z"/></svg></button>
-        <button class="tbtn" data-act="refresh" data-col="left" title="Refresh"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><path fill="#fff" d="M17.65,6.35C16.2,4.9,14.21,4,12,4c-4.42,0-7.99,3.58-7.99,8s3.57,8,7.99,8c3.73,0,6.84-2.55,7.73-6h-2.08c-0.82,2.33-3.04,4-5.65,4c-3.31,0-6-2.69-6-6s2.69-6,6-6c1.66,0,3.14,0.69,4.22,1.78L13,11h7V4L17.65,6.35z"/></svg></button>
-        <button class="tbtn" data-act="open" data-col="left" title="Open"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><polygon points="7.5,9 16.5,9 12,4" fill="#fff"/><line x1="12" y1="9" x2="12" y2="14.5" stroke="#fff" stroke-width="2.1" stroke-linecap="round"/><path d="M6,16.5 L6,18.5 Q6,19.5 7,19.5 L17,19.5 Q18,19.5 18,18.5 L18,16.5" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-        <button class="tbtn" data-act="save" data-col="left" title="Save"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><polygon points="7.5,11 16.5,11 12,16" fill="#fff"/><line x1="12" y1="4.5" x2="12" y2="11" stroke="#fff" stroke-width="2.1" stroke-linecap="round"/><path d="M6,16.5 L6,18.5 Q6,19.5 7,19.5 L17,19.5 Q18,19.5 18,18.5 L18,16.5" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="tbtn" data-act="undo" data-col="left" title="Undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a6 6 0 0 1 0 12H9"/></svg></button>
+        <button class="tbtn" data-act="redo" data-col="left" title="Redo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a6 6 0 0 0 0 12h6"/></svg></button>
+        <button class="tbtn" data-act="refresh" data-col="left" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
+        <button class="tbtn" data-act="open" data-col="left" title="Open"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></button>
+        <button class="tbtn" data-act="save" data-col="left" title="Save"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
       </div>
     </div>
     <div class="swap-cell" id="swapcell-left-mid">
-      <button class="swap-btn" data-swap-a="left" data-swap-b="mid" title="Swap left and middle files"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><rect x="8" y="11" width="8" height="2" fill="#fff"/><polygon points="2,12 8,7 8,17" fill="#fff"/><polygon points="22,12 16,7 16,17" fill="#fff"/></svg></button>
+      <button class="swap-btn" data-swap-a="left" data-swap-b="mid" title="Swap left and middle files"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3L4 7l4 4"/><path d="M4 7h16"/><path d="M16 21l4-4-4-4"/><path d="M20 17H4"/></svg></button>
     </div>
     <div class="swap-cell" id="swapcell-left-right-2way">
-      <button class="swap-btn" data-swap-a="left" data-swap-b="right" title="Swap left and right files"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><rect x="8" y="11" width="8" height="2" fill="#fff"/><polygon points="2,12 8,7 8,17" fill="#fff"/><polygon points="22,12 16,7 16,17" fill="#fff"/></svg></button>
+      <button class="swap-btn" data-swap-a="left" data-swap-b="right" title="Swap left and right files"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3L4 7l4 4"/><path d="M4 7h16"/><path d="M16 21l4-4-4-4"/><path d="M20 17H4"/></svg></button>
     </div>
     <div class="col-label" id="pathcol-mid">
       <input type="text" id="path-mid" placeholder="Middle file" readonly>
       <div class="filebtns">
-        <button class="tbtn" data-act="undo" data-col="mid" title="Undo"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><path fill="#fff" d="M12.5,8C9.85,8,7.45,8.99,5.6,10.6L2,7v9h9l-3.62-3.62c1.39-1.16,3.16-1.88,5.12-1.88c3.54,0,6.55,2.31,7.6,5.5l2.37-0.78C21.08,11.03,17.15,8,12.5,8z"/></svg></button>
-        <button class="tbtn" data-act="redo" data-col="mid" title="Redo"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><path fill="#fff" d="M18.4,10.6C16.55,8.99,14.15,8,11.5,8c-4.65,0-8.58,3.03-9.96,7.22L3.9,16C4.95,12.81,7.95,10.5,11.5,10.5c1.95,0,3.73,0.72,5.12,1.88L13,16h9V7L18.4,10.6z"/></svg></button>
-        <button class="tbtn" data-act="refresh" data-col="mid" title="Refresh"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><path fill="#fff" d="M17.65,6.35C16.2,4.9,14.21,4,12,4c-4.42,0-7.99,3.58-7.99,8s3.57,8,7.99,8c3.73,0,6.84-2.55,7.73-6h-2.08c-0.82,2.33-3.04,4-5.65,4c-3.31,0-6-2.69-6-6s2.69-6,6-6c1.66,0,3.14,0.69,4.22,1.78L13,11h7V4L17.65,6.35z"/></svg></button>
-        <button class="tbtn" data-act="open" data-col="mid" title="Open"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><polygon points="7.5,9 16.5,9 12,4" fill="#fff"/><line x1="12" y1="9" x2="12" y2="14.5" stroke="#fff" stroke-width="2.1" stroke-linecap="round"/><path d="M6,16.5 L6,18.5 Q6,19.5 7,19.5 L17,19.5 Q18,19.5 18,18.5 L18,16.5" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-        <button class="tbtn" data-act="save" data-col="mid" title="Save"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><polygon points="7.5,11 16.5,11 12,16" fill="#fff"/><line x1="12" y1="4.5" x2="12" y2="11" stroke="#fff" stroke-width="2.1" stroke-linecap="round"/><path d="M6,16.5 L6,18.5 Q6,19.5 7,19.5 L17,19.5 Q18,19.5 18,18.5 L18,16.5" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="tbtn" data-act="undo" data-col="mid" title="Undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a6 6 0 0 1 0 12H9"/></svg></button>
+        <button class="tbtn" data-act="redo" data-col="mid" title="Redo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a6 6 0 0 0 0 12h6"/></svg></button>
+        <button class="tbtn" data-act="refresh" data-col="mid" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
+        <button class="tbtn" data-act="open" data-col="mid" title="Open"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></button>
+        <button class="tbtn" data-act="save" data-col="mid" title="Save"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
       </div>
     </div>
     <div class="swap-cell" id="swapcell-mid-right">
-      <button class="swap-btn" data-swap-a="mid" data-swap-b="right" title="Swap middle and right files"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><rect x="8" y="11" width="8" height="2" fill="#fff"/><polygon points="2,12 8,7 8,17" fill="#fff"/><polygon points="22,12 16,7 16,17" fill="#fff"/></svg></button>
+      <button class="swap-btn" data-swap-a="mid" data-swap-b="right" title="Swap middle and right files"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3L4 7l4 4"/><path d="M4 7h16"/><path d="M16 21l4-4-4-4"/><path d="M20 17H4"/></svg></button>
     </div>
     <div class="col-label" id="pathcol-right">
       <input type="text" id="path-right" placeholder="Right file" readonly>
       <div class="filebtns">
-        <button class="tbtn" data-act="undo" data-col="right" title="Undo"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><path fill="#fff" d="M12.5,8C9.85,8,7.45,8.99,5.6,10.6L2,7v9h9l-3.62-3.62c1.39-1.16,3.16-1.88,5.12-1.88c3.54,0,6.55,2.31,7.6,5.5l2.37-0.78C21.08,11.03,17.15,8,12.5,8z"/></svg></button>
-        <button class="tbtn" data-act="redo" data-col="right" title="Redo"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><path fill="#fff" d="M18.4,10.6C16.55,8.99,14.15,8,11.5,8c-4.65,0-8.58,3.03-9.96,7.22L3.9,16C4.95,12.81,7.95,10.5,11.5,10.5c1.95,0,3.73,0.72,5.12,1.88L13,16h9V7L18.4,10.6z"/></svg></button>
-        <button class="tbtn" data-act="refresh" data-col="right" title="Refresh"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><path fill="#fff" d="M17.65,6.35C16.2,4.9,14.21,4,12,4c-4.42,0-7.99,3.58-7.99,8s3.57,8,7.99,8c3.73,0,6.84-2.55,7.73-6h-2.08c-0.82,2.33-3.04,4-5.65,4c-3.31,0-6-2.69-6-6s2.69-6,6-6c1.66,0,3.14,0.69,4.22,1.78L13,11h7V4L17.65,6.35z"/></svg></button>
-        <button class="tbtn" data-act="open" data-col="right" title="Open"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><polygon points="7.5,9 16.5,9 12,4" fill="#fff"/><line x1="12" y1="9" x2="12" y2="14.5" stroke="#fff" stroke-width="2.1" stroke-linecap="round"/><path d="M6,16.5 L6,18.5 Q6,19.5 7,19.5 L17,19.5 Q18,19.5 18,18.5 L18,16.5" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-        <button class="tbtn" data-act="save" data-col="right" title="Save"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/><polygon points="7.5,11 16.5,11 12,16" fill="#fff"/><line x1="12" y1="4.5" x2="12" y2="11" stroke="#fff" stroke-width="2.1" stroke-linecap="round"/><path d="M6,16.5 L6,18.5 Q6,19.5 7,19.5 L17,19.5 Q18,19.5 18,18.5 L18,16.5" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="tbtn" data-act="undo" data-col="right" title="Undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a6 6 0 0 1 0 12H9"/></svg></button>
+        <button class="tbtn" data-act="redo" data-col="right" title="Redo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a6 6 0 0 0 0 12h6"/></svg></button>
+        <button class="tbtn" data-act="refresh" data-col="right" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
+        <button class="tbtn" data-act="open" data-col="right" title="Open"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></button>
+        <button class="tbtn" data-act="save" data-col="right" title="Save"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
       </div>
     </div>
   </div>
@@ -1316,9 +1334,9 @@ function buildConnectorButtonsHtml(list){
     const isLeft = btn.action==='copy-left';
     const title = isLeft ? 'Merge to left' : 'Merge to right';
     const iconHtml = isLeft
-      ? `<rect x="11" y="10.2" width="9" height="3.6" fill="#fff"/><polygon points="4,12 12,6.5 12,17.5" fill="#fff"/>`
-      : `<rect x="5" y="10.2" width="9" height="3.6" fill="#fff"/><polygon points="21,12 13,6.5 13,17.5" fill="#fff"/>`;
-    html += `<button class="actbtn" style="top:${top.toFixed(1)}px;${sideCss}" data-action="${btn.action}" data-row="${btn.rowIdx}" data-col="${btn.col}" title="${title}"><svg viewBox="0 0 24 24"><rect x="0.5" y="0.5" width="23" height="23" rx="5.5" fill="#739EEB"/>${iconHtml}</svg></button>`;
+      ? `<line x1="20" y1="12" x2="4" y2="12"/><polyline points="10 6 4 12 10 18"/>`
+      : `<line x1="4" y1="12" x2="20" y2="12"/><polyline points="14 6 20 12 14 18"/>`;
+    html += `<button class="actbtn" style="top:${top.toFixed(1)}px;${sideCss}" data-action="${btn.action}" data-row="${btn.rowIdx}" data-col="${btn.col}" title="${title}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${iconHtml}</svg></button>`;
   }
   return html;
 }
@@ -4147,20 +4165,17 @@ window.addEventListener('resize', ()=>{
   const btn = document.getElementById('btn-theme');
   const iconSun = document.getElementById('icon-theme-sun');
   const iconMoon = document.getElementById('icon-theme-moon');
-  const label = document.getElementById('theme-label');
 
   function applyTheme(theme){
     if(theme === 'dark'){
       htmlEl.setAttribute('data-theme','dark');
       iconSun.style.display = 'none';
       iconMoon.style.display = '';
-      label.textContent = 'Dark';
       btn.title = 'Switch to light mode';
     } else {
       htmlEl.removeAttribute('data-theme');
       iconSun.style.display = '';
       iconMoon.style.display = 'none';
-      label.textContent = 'Light';
       btn.title = 'Switch to dark mode';
     }
   }
