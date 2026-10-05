@@ -118,6 +118,11 @@
     position: relative;
   }
   .tool:hover { background: var(--panel-2); color: var(--text); }
+  /* Blue border on hover — enabled buttons only (top bar + left tool palette) */
+  header button:not(:disabled):not(.is-disabled):hover,
+  header .btn:hover,
+  .tool:hover { border-color: var(--accent); }
+  header button.is-disabled:hover { background: var(--panel-2); border-color: var(--border); cursor: default; }
   .tool.active { background: rgba(59,130,246,.15); border-color: var(--accent); color: var(--accent); }
   .tool svg { width: 22px; height: 22px; }
   .tool .tip {
@@ -826,8 +831,12 @@ function restore(snap) {
 function undo() { if (historyIndex > 0) { historyIndex--; restore(history[historyIndex]); } updateUndoRedo(); }
 function redo() { if (historyIndex < history.length - 1) { historyIndex++; restore(history[historyIndex]); } updateUndoRedo(); }
 function updateUndoRedo() {
-  document.getElementById("undoBtn").style.opacity = historyIndex > 0 ? 1 : .4;
-  document.getElementById("redoBtn").style.opacity = historyIndex < history.length - 1 ? 1 : .4;
+  const canUndo = historyIndex > 0, canRedo = historyIndex < history.length - 1;
+  const undoEl = document.getElementById("undoBtn"), redoEl = document.getElementById("redoBtn");
+  undoEl.style.opacity = canUndo ? 1 : .4;
+  redoEl.style.opacity = canRedo ? 1 : .4;
+  undoEl.classList.toggle("is-disabled", !canUndo);
+  redoEl.classList.toggle("is-disabled", !canRedo);
 }
 
 // ---------- Image loading ----------
