@@ -607,9 +607,16 @@
       <span>
         <span class="meta" id="rawMeta">0 bytes</span>
         <span class="icon-btn-group">
+          <button class="icon-btn" id="clearRaw" type="button" title="Clear" aria-label="Clear raw data">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+          </button>
           <button class="icon-btn" id="copyRaw" type="button" title="Copy" aria-label="Copy raw data">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           </button>
+          <button class="icon-btn" id="uploadRaw" type="button" title="Upload" aria-label="Upload raw data">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          </button>
+          <input type="file" id="uploadRawInput" hidden>
           <button class="icon-btn" id="downloadRaw" type="button" title="Download" aria-label="Download raw data">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           </button>
@@ -641,9 +648,16 @@
       <span>
         <span class="meta" id="encMeta">0 chars</span>
         <span class="icon-btn-group">
+          <button class="icon-btn" id="clearEnc" type="button" title="Clear" aria-label="Clear encoded data">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+          </button>
           <button class="icon-btn" id="copyEnc" type="button" title="Copy" aria-label="Copy encoded data">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           </button>
+          <button class="icon-btn" id="uploadEnc" type="button" title="Upload" aria-label="Upload encoded data">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          </button>
+          <input type="file" id="uploadEncInput" hidden>
           <button class="icon-btn" id="downloadEnc" type="button" title="Download" aria-label="Download encoded data">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           </button>
@@ -945,6 +959,12 @@
   const decodeBtn = document.getElementById("decodeBtn");
   const statusBar = document.getElementById("status");
   const copyRaw = document.getElementById("copyRaw");
+  const clearRaw = document.getElementById("clearRaw");
+  const clearEnc = document.getElementById("clearEnc");
+  const uploadRaw = document.getElementById("uploadRaw");
+  const uploadEnc = document.getElementById("uploadEnc");
+  const uploadRawInput = document.getElementById("uploadRawInput");
+  const uploadEncInput = document.getElementById("uploadEncInput");
   const copyEnc = document.getElementById("copyEnc");
   const downloadRaw = document.getElementById("downloadRaw");
   const downloadEnc = document.getElementById("downloadEnc");
@@ -1577,6 +1597,9 @@
     dropZone.classList.remove("dragover");
     const file = e.dataTransfer.files && e.dataTransfer.files[0];
     if (!file) return;
+    loadRawFile(file);
+  });
+  function loadRawFile(file) {
     const reader = new FileReader();
     reader.onload = () => {
       const bytes = new Uint8Array(reader.result);
@@ -1590,7 +1613,7 @@
     };
     reader.onerror = () => setStatus("Couldn't read that file.", true);
     reader.readAsArrayBuffer(file);
-  });
+  }
   // Safety net: if the drag is cancelled (e.g. dropped outside the window,
   // or the user presses Escape), make sure the highlight always clears.
   window.addEventListener("dragend", () => {
@@ -1670,6 +1693,43 @@
   }
   wireCopy(copyRaw, () => rawText.value);
   wireCopy(copyEnc, () => encText.value);
+
+  // ---------- clear / upload buttons ----------
+  clearRaw.addEventListener("click", () => {
+    rawText.value = "";
+    rawBytesOverride = null;
+    updateRawMeta();
+    if (rawView === "hex") renderHexView();
+    setStatus("Cleared raw data.");
+  });
+
+  clearEnc.addEventListener("click", () => {
+    encText.value = "";
+    updateEncMeta();
+    setStatus("Cleared encoded data.");
+  });
+
+  uploadRaw.addEventListener("click", () => uploadRawInput.click());
+  uploadRawInput.addEventListener("change", () => {
+    const file = uploadRawInput.files && uploadRawInput.files[0];
+    uploadRawInput.value = "";
+    if (file) loadRawFile(file);
+  });
+
+  uploadEnc.addEventListener("click", () => uploadEncInput.click());
+  uploadEncInput.addEventListener("change", () => {
+    const file = uploadEncInput.files && uploadEncInput.files[0];
+    uploadEncInput.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      encText.value = reader.result;
+      updateEncMeta();
+      setStatus(`Loaded "${file.name}" (${formatBytes(file.size)}). Press Decode.`);
+    };
+    reader.onerror = () => setStatus("Couldn't read that file.", true);
+    reader.readAsText(file);
+  });
 
   // ---------- download buttons ----------
   // Anchor-click download: the only mechanism available on mobile browsers,
