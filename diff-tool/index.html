@@ -2,7 +2,24 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" id="viewport-meta" content="width=device-width, initial-scale=1.0">
+<script>
+/* Phones / small touch devices: keep the original wide desktop layout
+   instead of reflowing to a narrow screen. A fixed 1100px-wide layout
+   viewport is used (browser auto-fits it to the screen width at first),
+   and the user can pan with one finger and pinch-zoom freely. */
+(function(){
+  try{
+    var shortSide = Math.min(screen.width, screen.height);
+    var isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    if(isTouch && shortSide < 900){
+      document.getElementById('viewport-meta').setAttribute('content',
+        'width=1100, minimum-scale=0.1, maximum-scale=5, user-scalable=yes');
+      document.documentElement.classList.add('force-desktop');
+    }
+  }catch(e){ /* ignore */ }
+})();
+</script>
 <title>Diff Tool</title>
 <meta name="tool-name" content="Diff Tool">
 <meta name="tool-version" content="">
@@ -82,6 +99,14 @@
   *{box-sizing:border-box;}
   html,body{height:100%;margin:0;font-family:"Segoe UI","Microsoft JhengHei",sans-serif;background:var(--bg);color:var(--text);font-size:13px;}
   body{display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+  /* Mobile: fixed desktop-sized canvas; the page itself pans/zooms. */
+  /* overflow:hidden on <body> propagates to the viewport when <html> has
+     overflow:visible, which blocked scrolling to the bottom part of the page.
+     Giving <html> its own overflow stops that propagation, so the page can
+     be panned vertically/horizontally (body still clips itself). */
+  html.force-desktop{overflow:auto;-webkit-overflow-scrolling:touch;}
+  html.force-desktop,html.force-desktop body{height:auto;}
+  html.force-desktop body{width:1280px;height:720px;}
 
   /* Top toolbar */
   .toolbar{
