@@ -3,6 +3,20 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<script>
+// On phones/tablets keep the desktop (landscape) layout: lay the page out at a
+// fixed 1280px width and let the browser scale it down to fit; the user can
+// then pinch-zoom and drag the page around with their fingers.
+(function () {
+  var ua = navigator.userAgent || "";
+  var mobile = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(ua) ||
+               (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+  if (!mobile) return;
+  document.documentElement.classList.add("mobile-layout");
+  var v = document.querySelector('meta[name="viewport"]');
+  if (v) v.setAttribute("content", "width=1280, minimum-scale=0.1, maximum-scale=10, user-scalable=yes");
+})();
+</script>
 <title>Image Annotator</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%221em%22 font-size=%2280%22>🖍️</text></svg>">
 <meta name="tool-name" content="Image Annotator">
@@ -37,6 +51,17 @@
     flex-direction: column;
     overflow: hidden;
   }
+
+  /* Mobile: keep the fixed desktop landscape layout (1280x720). The page is
+     scaled to fit by the viewport meta; pinch-zoom / drag to move around. */
+  html.mobile-layout, html.mobile-layout body {
+    width: 1280px;
+    height: 720px;
+  }
+  html.mobile-layout { overflow: visible; }
+  /* One finger still draws/selects on the canvas; two-finger pinch is handed
+     to the browser so the whole page can be zoomed and panned. */
+  html.mobile-layout #canvas { touch-action: pinch-zoom; }
 
   /* Top bar */
   header {
@@ -1607,7 +1632,7 @@ canvas.addEventListener("pointerdown", (e) => {
     selectOnly(o.id);
     if (state.tool === "text" || state.tool === "number") {
       pushHistory(); render(); buildProps();
-      if (o.type === "text") setTimeout(() => { const t = document.getElementById("prop-text"); if (t) { t.focus(); t.select(); } }, 30);
+      if (o.type === "text") setTimeout(() => { const t = document.getElementById("prop-text"); if (t) { t.focus({ preventScroll: true }); t.select(); } }, 30);
     } else {
       action = { mode: "create", o, start: p, orig: JSON.parse(JSON.stringify(o)) };
       if (o.type === "pen") action.raw = [{ x: p.x, y: p.y }];
@@ -1927,7 +1952,13 @@ function buildObjectList() {
   objListEl.innerHTML = html;
 
   const selItem = objListEl.querySelector(".obj-item.selected");
-  if (selItem) selItem.scrollIntoView({ block: "nearest" });
+  if (selItem) {
+    // Scroll only the object list itself. (scrollIntoView would also scroll the
+    // page/visual viewport horizontally toward this right-hand panel on mobile.)
+    const lr = objListEl.getBoundingClientRect(), ir = selItem.getBoundingClientRect();
+    if (ir.top < lr.top) objListEl.scrollTop -= lr.top - ir.top;
+    else if (ir.bottom > lr.bottom) objListEl.scrollTop += ir.bottom - lr.bottom;
+  }
 
   objListEl.querySelectorAll(".obj-item").forEach((item) => {
     item.addEventListener("click", (e) => {
