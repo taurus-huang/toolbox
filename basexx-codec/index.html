@@ -6,7 +6,7 @@
 <title>BaseXX Codec</title>
 <meta name="tool-name" content="BaseXX Codec">
 <meta name="tool-version" content="">
-<meta name="tool-desc" content="Supports Base16, Base32, Base64, Base85, Base91 encode/decode.">
+<meta name="tool-desc" content="Supports Base16, Base32, Base64, Base85, Base91, URL encode/decode.">
 <meta name="tool-desc" content="Supports drag-and-drop file.">
 <meta name="tool-desc" content="Entirely local processing, no data uploaded.">
 <style>
@@ -586,6 +586,7 @@
         <option value="base64" selected>Base64</option>
         <option value="base85">Base85</option>
         <option value="base91">Base91</option>
+        <option value="url">URL</option>
       </select>
     </div>
   </div>
@@ -940,12 +941,57 @@
     return bytes;
   }
 
+  // --- URL (percent-encoding) ---
+  // Works on raw bytes (UTF-8 for text), so it round-trips arbitrary data.
+  // Leaves the same characters unescaped as encodeURIComponent:
+  // A-Z a-z 0-9 - _ . ! ~ * ' ( )
+  function urlEncode(bytes) {
+    let out = "";
+    for (let i = 0; i < bytes.length; i++) {
+      const b = bytes[i];
+      if (
+        (b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5a) || (b >= 0x61 && b <= 0x7a) ||
+        "-_.!~*'()".indexOf(String.fromCharCode(b)) !== -1
+      ) {
+        out += String.fromCharCode(b);
+      } else {
+        out += "%" + b.toString(16).toUpperCase().padStart(2, "0");
+      }
+    }
+    return out;
+  }
+
+  function urlDecode(str) {
+    const clean = str.trim();
+    const enc = new TextEncoder();
+    const bytesOut = [];
+    for (let i = 0; i < clean.length; ) {
+      const ch = clean[i];
+      if (ch === "%") {
+        const hex = clean.substr(i + 1, 2);
+        if (!/^[0-9a-fA-F]{2}$/.test(hex)) {
+          throw new Error("Invalid percent-encoding at position " + i);
+        }
+        bytesOut.push(parseInt(hex, 16));
+        i += 3;
+      } else {
+        const cp = clean.codePointAt(i);
+        const piece = String.fromCodePoint(cp);
+        const eb = enc.encode(piece);
+        for (let k = 0; k < eb.length; k++) bytesOut.push(eb[k]);
+        i += piece.length;
+      }
+    }
+    return new Uint8Array(bytesOut);
+  }
+
   const codecs = {
     base16: { encode: base16Encode, decode: base16Decode },
     base32: { encode: base32Encode, decode: base32Decode },
     base64: { encode: base64Encode, decode: base64Decode },
     base85: { encode: base85Encode, decode: base85Decode },
     base91: { encode: base91Encode, decode: base91Decode },
+    url: { encode: urlEncode, decode: urlDecode },
   };
 
   // ---------- elements ----------
