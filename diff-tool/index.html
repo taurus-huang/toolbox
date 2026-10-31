@@ -526,6 +526,19 @@
     border-radius:2px;
     outline:1px solid rgba(200,50,50,0.5);
   }
+
+  /* ---- Save-state indicators & dialogs (file saving) ---- */
+  .pathrow input[type=text].dirty{color:var(--text);font-weight:600;}
+  .tbtn:disabled{opacity:.4;cursor:default;}
+  .fm-overlay{position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:center;justify-content:center;}
+  .fm-dialog{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:16px 18px;width:min(480px,calc(100vw - 32px));box-shadow:0 8px 28px rgba(0,0,0,.4);}
+  .fm-msg{white-space:pre-wrap;line-height:1.5;font-size:13px;margin-bottom:14px;word-break:break-word;}
+  .fm-row{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;}
+  .fm-btn{background:var(--btn-bg);border:1px solid var(--btn-border);color:var(--text);border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;font-family:inherit;}
+  .fm-btn:hover{background:var(--btn-hover);border-color:var(--accent);}
+  .fm-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+  .fm-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .fm-btn.danger{border-color:#e53935;color:#e53935;}
 </style>
 </head>
 <body>
@@ -562,8 +575,9 @@
         <button class="tbtn" data-act="undo" data-col="left" title="Undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a6 6 0 0 1 0 12H9"/></svg></button>
         <button class="tbtn" data-act="redo" data-col="left" title="Redo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a6 6 0 0 0 0 12h6"/></svg></button>
         <button class="tbtn" data-act="refresh" data-col="left" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
-        <button class="tbtn" data-act="open" data-col="left" title="Open"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></button>
-        <button class="tbtn" data-act="save" data-col="left" title="Save"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
+        <button class="tbtn" data-act="open" data-col="left" title="Open"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18V5a1 1 0 0 1 1-1h5l2 2h7a1 1 0 0 1 1 1v2"/><path d="M3.2 19.2L6 10.4a1 1 0 0 1 .95-.7H21a1 1 0 0 1 .95 1.3L19.5 18.6a1 1 0 0 1-.95.7H4.2a1 1 0 0 1-1-1.1z" transform="translate(0 -0.3)"/></svg></button>
+        <button class="tbtn" data-act="save" data-col="left" title="Save"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></button>
+        <button class="tbtn" data-act="saveas" data-col="left" title="Save As..."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/><g stroke="var(--btn-bg)" stroke-width="5"><path d="M11 17h10M17 13l4 4-4 4"/></g><path d="M11 17h10M17 13l4 4-4 4"/></svg></button>
       </div>
     </div>
     <div class="swap-cell" id="swapcell-left-mid">
@@ -578,8 +592,9 @@
         <button class="tbtn" data-act="undo" data-col="mid" title="Undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a6 6 0 0 1 0 12H9"/></svg></button>
         <button class="tbtn" data-act="redo" data-col="mid" title="Redo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a6 6 0 0 0 0 12h6"/></svg></button>
         <button class="tbtn" data-act="refresh" data-col="mid" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
-        <button class="tbtn" data-act="open" data-col="mid" title="Open"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></button>
-        <button class="tbtn" data-act="save" data-col="mid" title="Save"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
+        <button class="tbtn" data-act="open" data-col="mid" title="Open"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18V5a1 1 0 0 1 1-1h5l2 2h7a1 1 0 0 1 1 1v2"/><path d="M3.2 19.2L6 10.4a1 1 0 0 1 .95-.7H21a1 1 0 0 1 .95 1.3L19.5 18.6a1 1 0 0 1-.95.7H4.2a1 1 0 0 1-1-1.1z" transform="translate(0 -0.3)"/></svg></button>
+        <button class="tbtn" data-act="save" data-col="mid" title="Save"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></button>
+        <button class="tbtn" data-act="saveas" data-col="mid" title="Save As..."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/><g stroke="var(--btn-bg)" stroke-width="5"><path d="M11 17h10M17 13l4 4-4 4"/></g><path d="M11 17h10M17 13l4 4-4 4"/></svg></button>
       </div>
     </div>
     <div class="swap-cell" id="swapcell-mid-right">
@@ -591,8 +606,9 @@
         <button class="tbtn" data-act="undo" data-col="right" title="Undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a6 6 0 0 1 0 12H9"/></svg></button>
         <button class="tbtn" data-act="redo" data-col="right" title="Redo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a6 6 0 0 0 0 12h6"/></svg></button>
         <button class="tbtn" data-act="refresh" data-col="right" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
-        <button class="tbtn" data-act="open" data-col="right" title="Open"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></button>
-        <button class="tbtn" data-act="save" data-col="right" title="Save"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
+        <button class="tbtn" data-act="open" data-col="right" title="Open"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18V5a1 1 0 0 1 1-1h5l2 2h7a1 1 0 0 1 1 1v2"/><path d="M3.2 19.2L6 10.4a1 1 0 0 1 .95-.7H21a1 1 0 0 1 .95 1.3L19.5 18.6a1 1 0 0 1-.95.7H4.2a1 1 0 0 1-1-1.1z" transform="translate(0 -0.3)"/></svg></button>
+        <button class="tbtn" data-act="save" data-col="right" title="Save"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></button>
+        <button class="tbtn" data-act="saveas" data-col="right" title="Save As..."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/><g stroke="var(--btn-bg)" stroke-width="5"><path d="M11 17h10M17 13l4 4-4 4"/></g><path d="M11 17h10M17 13l4 4-4 4"/></svg></button>
       </div>
     </div>
   </div>
@@ -641,9 +657,9 @@ const GAP_H = 0; // px, must match CSS .gap-line height (gap row takes no vertic
 const state = {
   mode: '2way', // '2way' or '3way'
   cols: {
-    left:  { text: '',  lines: [], history: [], future: [], userLoaded: false, fullPath: '', handle: null },
-    mid:   { text: '',   lines: [], history: [], future: [], userLoaded: false, fullPath: '', handle: null },
-    right: { text: '', lines: [], history: [], future: [], userLoaded: false, fullPath: '', handle: null },
+    left:  makeColState(),
+    mid:   makeColState(),
+    right: makeColState(),
   },
   // diff alignment rows: each row = {left:{type,lineIdx}|null, mid:.., right:..}
   rows: [],
@@ -1191,6 +1207,7 @@ function updateEditButtonStates(){
   if(recomputeBtn) recomputeBtn.disabled = !anyLoaded;
 
   updatePaneEmptyHints();
+  updateFileUI();
 }
 
 /* Show the "Drag and drop a file here" hint in a pane's content area only
@@ -2327,10 +2344,13 @@ function commitColumnEdits(col){
 }
 
 let editDebounce = null;
+let pendingEditRun = null;
 function onContentInput(e){
   const col = e.target.dataset.col;
+  const colObj = state.cols[col];
   if(editDebounce) clearTimeout(editDebounce);
-  editDebounce = setTimeout(()=>{
+  colObj.inputPending = true; // typed but not yet committed to .text -> counts as unsaved
+  pendingEditRun = ()=>{
     // Capture where the caret actually is once typing pauses (not on every
     // keystroke), so the re-diff/re-render this triggers can put the caret
     // back afterward instead of the view jumping to the first diff and the
@@ -2345,8 +2365,25 @@ function onContentInput(e){
       }
     }
     commitColumnEdits(col);
+    colObj.inputPending = false;
     recompute({keepView:true, restoreCaret});
+  };
+  editDebounce = setTimeout(()=>{
+    editDebounce = null;
+    const run = pendingEditRun; pendingEditRun = null;
+    if(run) run();
   }, 600);
+  updateFileUI();
+}
+
+// Commit typing that is still waiting for the debounce (before Save, before
+// the page closes), so what is saved is exactly what is on screen.
+function flushPendingEdits(){
+  if(!editDebounce) return;
+  clearTimeout(editDebounce);
+  editDebounce = null;
+  const run = pendingEditRun; pendingEditRun = null;
+  if(run) run();
 }
 
 /* ======================================================================
@@ -2404,66 +2441,331 @@ function swapColumns(colA, colB){
    File Open / Save / Refresh
    ====================================================================== */
 
-let fileInputTargetCol = null;
+/* ---------- Per-column file / handle / dirty bookkeeping ----------
+   Each column (state.cols[col]) tracks, independently of the other two:
+     text          - what is currently in the editor
+     fullPath      - display name of the loaded file / current save target
+     handle        - FileSystemFileHandle the file was originally loaded from
+                     (picker or drag & drop), or null
+     saveHandle    - where "Save" writes right now: starts as `handle`, and is
+                     replaced by the new file after a successful "Save As"
+     handleSource  - 'picker' | 'drop' | 'saveAs' | null  (null = no direct write)
+     savedText     - editor text (EOL-normalised) as of the last successful
+                     load / save; the baseline for the "unsaved" marker
+     diskText      - raw text we last saw on disk for saveHandle (load or our
+                     own last write); used to detect external modification
+     exportedText  - editor text last sent through a browser download, so we
+                     don't nag on page close after the user did download it
+     eol           - '\n' or '\r\n' detected at load, restored when saving
+     inputPending  - typing not yet committed to .text (600ms debounce)
+     saving        - a save is in progress for this column                    */
+
+function makeColState(){
+  return {
+    text: '', lines: [], history: [], future: [], userLoaded: false, fullPath: '',
+    handle: null, saveHandle: null, lastSaveHandle: null, handleSource: null,
+    savedText: '', diskText: null, exportedText: null, eol: '\n',
+    inputPending: false, saving: false,
+  };
+}
+
+function normEol(s){ return (s || '').replace(/\r\n/g, '\n'); }
+function detectEol(text){
+  const crlf = (text.match(/\r\n/g) || []).length;
+  const lf = (text.match(/\n/g) || []).length - crlf;
+  return crlf > lf ? '\r\n' : '\n';
+}
+// What actually gets written to disk: the editor text with the file's original
+// line-ending style restored (the editor itself always joins lines with \n).
+function serializeForSave(c){
+  return c.eol === '\r\n' ? c.text.replace(/\r?\n/g, '\r\n') : c.text;
+}
+function isDirty(c){
+  return !!(c && c.userLoaded && (c.inputPending || normEol(c.text) !== c.savedText));
+}
+
+// Replace a column's content with text that is known to match the disk.
+function setColumnContent(c, text){
+  c.history = [];
+  c.future = [];
+  c.text = text;
+  c.savedText = normEol(text);
+  c.diskText = text;
+  c.exportedText = null;
+  c.eol = detectEol(text);
+  c.inputPending = false;
+}
+
+// Single place that atomically (re)associates a column with a loaded file:
+// text, name and handles are always updated together, only after the file
+// was read successfully.
+function applyLoadedFile(col, text, name, handle, source){
+  const c = state.cols[col];
+  if(handle && typeof handle.createWritable !== 'function') handle = null; // read-only handle: can't overwrite
+  c.handle = handle || null;
+  c.saveHandle = c.handle;
+  c.lastSaveHandle = c.handle;
+  c.handleSource = c.handle ? source : null;
+  c.fullPath = name;
+  c.userLoaded = true;
+  setColumnContent(c, text);
+}
+
+// Decided purely by runtime feature detection (no device / UA sniffing): any
+// browser that really exposes showSaveFilePicker -- desktop or mobile -- gets
+// the native Save As picker; everything else falls back to a download.
+function canPickSave(){
+  return typeof window.showSaveFilePicker === 'function';
+}
+
+function fileStateText(c){
+  const lines = [isDirty(c) ? 'Unsaved changes' : 'No unsaved changes'];
+  if(c.saveHandle){
+    const src = c.handleSource === 'saveAs' ? 'saved-as file' : c.handleSource === 'drop' ? 'drag & drop' : 'file picker';
+    lines.push(`Direct save: ON -> ${c.saveHandle.name} (${src})`);
+  } else {
+    lines.push(canPickSave()
+      ? 'Direct save: OFF - Save will open Save As'
+      : 'Direct save: OFF - Save will download a copy');
+  }
+  return lines.join('\n');
+}
+
+function saveButtonTitle(c){
+  if(!c.userLoaded) return 'Save';
+  if(c.saveHandle) return `Save - overwrite ${c.saveHandle.name}`;
+  return canPickSave()
+    ? 'Save As... (no direct-write access to the original file)'
+    : "Download a copy (this browser can't overwrite the original file)";
+}
 
 // Sync the path input display from state
 function syncPathInput(col){
   const inputId = col === 'mid' ? 'path-mid' : 'path-' + col;
   const el = document.getElementById(inputId);
-  if(el) el.value = state.cols[col].fullPath;
+  if(!el) return;
+  const c = state.cols[col];
+  const dirty = isDirty(c);
+  el.value = (dirty ? '\u25CF ' : '') + c.fullPath;
+  el.classList.toggle('dirty', dirty);
+  el.title = c.userLoaded ? (c.fullPath + '\n' + fileStateText(c)) : '';
+}
+
+// Refresh everything that depends on the file / dirty state of the columns.
+function updateFileUI(){
+  ['left','mid','right'].forEach(col=>{
+    const c = state.cols[col];
+    syncPathInput(col);
+    const saveBtn = document.querySelector(`.tbtn[data-act="save"][data-col="${col}"]`);
+    const saveAsBtn = document.querySelector(`.tbtn[data-act="saveas"][data-col="${col}"]`);
+    if(saveBtn){
+      // Save is only available while there are unsaved changes.
+      saveBtn.disabled = !isDirty(c);
+      saveBtn.classList.toggle('dirty', isDirty(c));
+      saveBtn.title = saveButtonTitle(c);
+    }
+    if(saveAsBtn) saveAsBtn.disabled = !c.userLoaded;
+  });
+}
+
+/* ---------- Messages / dialogs ---------- */
+
+// Errors get the red status bar plus an alert: the status bar alone is easy to miss.
+function notifyError(msg){
+  setStatus(msg, true);
+  alert(msg);
+}
+
+// Small modal built on the app's own theme variables. Resolves with the chosen
+// choice's value (or cancelValue on Escape).
+function askChoice(message, choices, cancelValue){
+  return new Promise(resolve=>{
+    const prevFocus = document.activeElement;
+    const overlay = document.createElement('div');
+    overlay.className = 'fm-overlay';
+    const dlg = document.createElement('div');
+    dlg.className = 'fm-dialog';
+    dlg.setAttribute('role', 'alertdialog');
+    dlg.setAttribute('aria-modal', 'true');
+    const msg = document.createElement('div');
+    msg.className = 'fm-msg';
+    msg.textContent = message;
+    const row = document.createElement('div');
+    row.className = 'fm-row';
+    function done(v){
+      document.removeEventListener('keydown', onKey, true);
+      overlay.remove();
+      if(prevFocus && prevFocus.focus){ try{ prevFocus.focus({preventScroll:true}); }catch(_){} }
+      resolve(v);
+    }
+    function onKey(e){
+      if(e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); done(cancelValue); }
+    }
+    choices.forEach(ch=>{
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'fm-btn' + (ch.danger ? ' danger' : '') + (ch.primary ? ' primary' : '');
+      b.textContent = ch.label;
+      b.addEventListener('click', ()=>done(ch.value));
+      row.appendChild(b);
+      if(ch.focus) setTimeout(()=>b.focus(), 0);
+    });
+    dlg.appendChild(msg);
+    dlg.appendChild(row);
+    overlay.appendChild(dlg);
+    document.body.appendChild(overlay);
+    document.addEventListener('keydown', onKey, true);
+  });
+}
+
+// Before replacing the content of some columns: ask if any has unsaved edits.
+async function confirmDiscardFor(cols, action){
+  const dirtyCols = cols.filter(col=>isDirty(state.cols[col]));
+  if(!dirtyCols.length) return true;
+  const names = dirtyCols.map(col=>`${colLabel(col)} (${state.cols[col].fullPath})`).join(', ');
+  const r = await askChoice(
+    `Unsaved changes in: ${names}.\n${action} will discard them.`,
+    [
+      { label:'Discard changes and continue', value:'go', danger:true },
+      { label:'Cancel', value:'cancel', focus:true },
+    ],
+    'cancel'
+  );
+  return r === 'go';
+}
+
+/* ---------- File System Access helpers ---------- */
+
+function fsErrorKind(err){
+  const n = err && err.name;
+  if(n === 'AbortError') return 'cancelled';
+  if(n === 'NotAllowedError' || n === 'SecurityError') return 'permission';
+  if(n === 'NotFoundError') return 'notfound';
+  if(n === 'InvalidStateError' || n === 'NoModificationAllowedError') return 'state';
+  if(n === 'QuotaExceededError') return 'quota';
+  return 'other';
+}
+function fsErrorMessage(err){
+  const detail = (err && (err.message || err.name)) ? ` (${err.message || err.name})` : '';
+  switch(fsErrorKind(err)){
+    case 'permission': return 'The browser denied access to the file' + detail;
+    case 'notfound':   return 'The file or its folder no longer exists (moved, renamed or deleted)' + detail;
+    case 'state':      return 'The file is locked, was changed underneath us, or its handle is no longer valid' + detail;
+    case 'quota':      return 'Not enough disk space' + detail;
+    default:           return 'Unexpected file error' + detail;
+  }
+}
+
+// 'granted' | 'denied'. If the browser has no permission API we can't know in
+// advance, so let the real operation decide (it throws if access is refused).
+async function ensurePermission(handle, mode){
+  if(typeof handle.queryPermission !== 'function') return 'granted';
+  let p = await handle.queryPermission({ mode });
+  if(p === 'granted') return 'granted';
+  if(typeof handle.requestPermission === 'function') p = await handle.requestPermission({ mode });
+  return p === 'granted' ? 'granted' : 'denied';
+}
+
+// createWritable() writes to a temporary copy; the real file is only replaced
+// when close() succeeds, so a failure part-way leaves the original intact.
+async function writeTextToHandle(handle, data){
+  let writable = null;
+  try{
+    writable = await handle.createWritable();
+    await writable.write(data);
+    await writable.close();
+    writable = null;
+  }catch(err){
+    if(writable){ try{ await writable.abort(); }catch(_){ /* ignore */ } }
+    throw err;
+  }
+}
+
+// Compare what is on disk now with what we last saw there.
+async function checkExternalChange(c, handle){
+  if(c.diskText === null || c.diskText === undefined) return { status:'unknown', reason:'no record of the original content' };
+  try{
+    const f = await handle.getFile();
+    const t = await f.text();
+    return t === c.diskText ? { status:'same' } : { status:'changed' };
+  }catch(err){
+    return { status:'unknown', reason: fsErrorMessage(err) };
+  }
+}
+
+/* ---------- Open ---------- */
+
+let fileInputTargetCol = null;
+
+function loadedStatus(label, name, hasHandle, via){
+  return `${via} ${label}: ${name}` + (hasHandle
+    ? ' - direct save to this file is available'
+    : ' - no direct-write access (Save will use Save As / download)');
 }
 
 async function openFile(col){
-  // Prefer the File System Access API: it gives us a reusable file handle so
-  // the Refresh button can later re-read the file straight from disk.
-  if(window.showOpenFilePicker){
+  // Prefer the File System Access API: it gives us a reusable, writable file
+  // handle, so Save can overwrite the original and Refresh can re-read it.
+  if(typeof window.showOpenFilePicker === 'function'){
+    let handle;
     try{
-      const [handle] = await window.showOpenFilePicker({ multiple:false });
-      const file = await handle.getFile();
-      const text = await file.text();
-      resetHistory(col);
-      state.cols[col].text = text;
-      state.cols[col].fullPath = file.name;
-      state.cols[col].userLoaded = true;
-      state.cols[col].handle = handle;
-      syncPathInput(col);
-      recompute();
-      focusDefaultCaret(col);
-      setStatus(`Opened ${colLabel(col)}: ${file.name}`);
+      [handle] = await window.showOpenFilePicker({ multiple:false });
     }catch(err){
-      if(err && err.name === 'AbortError') return; // user cancelled the picker
+      if(err && err.name === 'AbortError'){ setStatus(`${colLabel(col)}: open cancelled`); return; }
       // Some environments reject showOpenFilePicker (e.g. permissions policy);
       // fall back to the classic file input.
       fileInputTargetCol = col;
       document.getElementById('file-input').click();
+      return;
     }
+    // Read first; only touch the column once we have everything.
+    let file, text;
+    try{
+      file = await handle.getFile();
+      text = await file.text();
+    }catch(err){
+      notifyError(`${colLabel(col)}: could not read the selected file - ${fsErrorMessage(err)}. Nothing was changed.`);
+      return;
+    }
+    if(!await confirmDiscardFor([col], 'Opening another file')){
+      setStatus(`${colLabel(col)}: open cancelled - unsaved changes kept`);
+      return;
+    }
+    applyLoadedFile(col, text, file.name, handle, 'picker');
+    syncPathInput(col);
+    recompute();
+    focusDefaultCaret(col);
+    setStatus(loadedStatus(colLabel(col), file.name, !!state.cols[col].saveHandle, 'Opened'));
     return;
   }
   fileInputTargetCol = col;
   document.getElementById('file-input').click();
 }
 
-document.getElementById('file-input').addEventListener('change', (e)=>{
+document.getElementById('file-input').addEventListener('change', async (e)=>{
   const file = e.target.files[0];
-  if(!file) return;
-  const reader = new FileReader();
-  reader.onload = ()=>{
-    const col = fileInputTargetCol;
-    resetHistory(col);
-    state.cols[col].text = reader.result;
-    // Store full path: use webkitRelativePath if available, else just name
-    const fullPath = file.webkitRelativePath || file.name;
-    state.cols[col].fullPath = fullPath;
-    state.cols[col].userLoaded = true;
-    state.cols[col].handle = null; // classic <input type=file> cannot yield a re-readable handle
-    syncPathInput(col);
-    recompute();
-    focusDefaultCaret(col);
-    setStatus(`Opened ${colLabel(col)}: ${fullPath}`);
-  };
-  reader.readAsText(file);
+  const col = fileInputTargetCol;
+  if(!file || !col) return;
+  const textPromise = file.text();   // start reading before the input is reset
   e.target.value = '';
+  let text;
+  try{ text = await textPromise; }
+  catch(err){ notifyError(`${colLabel(col)}: could not read the selected file. Nothing was changed.`); return; }
+  if(!await confirmDiscardFor([col], 'Opening another file')){
+    setStatus(`${colLabel(col)}: open cancelled - unsaved changes kept`);
+    return;
+  }
+  // Store full path: use webkitRelativePath if available, else just name.
+  // A classic <input type=file> cannot yield a handle, so no direct save.
+  const fullPath = file.webkitRelativePath || file.name;
+  applyLoadedFile(col, text, fullPath, null, null);
+  syncPathInput(col);
+  recompute();
+  focusDefaultCaret(col);
+  setStatus(loadedStatus(colLabel(col), fullPath, false, 'Opened'));
 });
+
+/* ---------- Save / Save As / download ---------- */
 
 // True on phones/tablets (Android, iPhone, iPad, etc). There's no reliable
 // feature-based way to detect "this platform's Save As picker has no way
@@ -2479,103 +2781,257 @@ function isMobileDevice(){
   return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
 }
 
-async function saveFile(col){
-  const text = state.cols[col].text;
-  const filename = state.cols[col].fullPath || (col+'.txt');
-  const suggestedName = filename.split(/[\\/]/).pop(); // use only the filename part as the suggested name
+function markSaved(c, snapshotText, writtenData){
+  c.savedText = normEol(snapshotText);
+  c.diskText = writtenData;
+  c.exportedText = null;
+}
 
-  // Prefer the File System Access API: it pops up a real "Save As" dialog
-  // the user can navigate to any folder in, instead of always dropping
-  // the file into the browser's default Downloads folder. `id` (kept
-  // distinct per column, since left/mid/right may live in entirely
-  // different folders) hints the browser to remember the last folder for
-  // it, and startIn below explicitly reinforces that with our own
-  // remembered handle -- see the comment there for why both are used.
-  //
-  // On mobile this API's folder-picker screen has no obvious Cancel
-  // button, so it's skipped there in favor of the classic download below,
-  // which lands straight in the phone's normal Downloads folder.
-  if(window.showSaveFilePicker && !isMobileDevice()){
-    try{
-      const opts = { suggestedName, id: 'diffmerge-save-' + col };
-      // The `id` option asks the browser to remember the last folder used
-      // for this id on its own, but that turned out not to persist
-      // reliably (this file is typically opened via file://, where
-      // picker memory scoped to `id` alone doesn't behave consistently
-      // across browsers). Explicitly passing the previous save's file
-      // handle as `startIn` is the more direct way to say "open in the
-      // same folder as last time" -- it doesn't depend on the browser's
-      // own bookkeeping, just whatever handle we already have in memory.
-      if(state.cols[col].lastSaveHandle) opts.startIn = state.cols[col].lastSaveHandle;
-      const handle = await window.showSaveFilePicker(opts);
-      const writable = await handle.createWritable();
-      await writable.write(text);
-      await writable.close();
-      state.cols[col].lastSaveHandle = handle; // remember so the next Save defaults to this same folder
-      setStatus(`Saved ${colLabel(col)}: ${handle.name}`);
-    }catch(err){
-      if(err && err.name === 'AbortError') return; // user cancelled the save dialog
-      // Some environments reject showSaveFilePicker (e.g. permissions
-      // policy); fall back to the classic download below.
-      downloadFileClassic(text, suggestedName, col);
+/* Save: overwrite the current target directly if we have a handle, otherwise
+   fall back to Save As / download. saveAs:true always asks for a new target. */
+async function saveFile(col, opts){
+  const saveAs = !!(opts && opts.saveAs);
+  const c = state.cols[col];
+  if(!c.userLoaded){ setStatus(`${colLabel(col)}: nothing to save - open a file first`); return; }
+  flushPendingEdits();   // typing within the last 600ms is not in c.text yet
+  if(c.saving){ setStatus(`${colLabel(col)}: a save is already in progress`); return; }
+  c.saving = true;
+  const label = colLabel(col);
+  try{
+    if(!saveAs && c.saveHandle){
+      const r = await saveToCurrentHandle(c, label);
+      if(r === 'offer-saveas') await saveAsFlow(c, label, col);
+    }else{
+      await saveAsFlow(c, label, col);
     }
-    return;
+  }finally{
+    c.saving = false;
+    updateFileUI();
   }
-  downloadFileClassic(text, suggestedName, col);
+}
+
+// Shown after a direct write failed / was refused. Returns 'offer-saveas' or 'failed'.
+async function offerSaveAs(label, problem){
+  setStatus(`${label}: ${problem} - file NOT saved`, true);
+  const r = await askChoice(
+    `${problem}\n\nThe file was NOT saved and your changes are still unsaved.\nSave a copy somewhere else with "Save As" instead?`,
+    [
+      { label:'Save As...', value:'saveas', primary:true },
+      { label:'Close', value:'close', focus:true },
+    ],
+    'close'
+  );
+  return r === 'saveas' ? 'offer-saveas' : 'failed';
+}
+
+async function saveToCurrentHandle(c, label){
+  const handle = c.saveHandle;
+  setStatus(`Saving ${label}...`);
+
+  // 1. write permission (may prompt the user)
+  try{
+    if(await ensurePermission(handle, 'readwrite') === 'denied'){
+      return offerSaveAs(label, `Write permission for "${handle.name}" was denied`);
+    }
+  }catch(err){
+    return offerSaveAs(label, `Could not obtain write permission for "${handle.name}": ${fsErrorMessage(err)}`);
+  }
+
+  // 2. has someone else changed the file since we loaded / last wrote it?
+  const chk = await checkExternalChange(c, handle);
+  if(chk.status === 'changed'){
+    const choice = await askChoice(
+      `"${handle.name}" was modified outside this tool since it was loaded or last saved.\nOverwriting it will discard those external changes.`,
+      [
+        { label:'Reload from disk (discard my edits)', value:'reload' },
+        { label:'Cancel', value:'cancel', focus:true },
+        { label:'Overwrite anyway', value:'overwrite', danger:true },
+      ],
+      'cancel'
+    );
+    if(choice === 'reload'){ await reloadFromHandle(c, handle, label); return 'reloaded'; }
+    if(choice !== 'overwrite'){
+      setStatus(`${label}: save cancelled - file changed on disk`, true);
+      return 'cancelled';
+    }
+  }else if(chk.status === 'unknown'){
+    const choice = await askChoice(
+      `Could not verify whether "${handle.name}" was changed outside this tool (${chk.reason}).\nSave anyway?`,
+      [
+        { label:'Cancel', value:'cancel', focus:true },
+        { label:'Save anyway', value:'overwrite', danger:true },
+      ],
+      'cancel'
+    );
+    if(choice !== 'overwrite'){
+      setStatus(`${label}: save cancelled - could not verify the file on disk`, true);
+      return 'cancelled';
+    }
+  }
+
+  // 3. write. Snapshot text and bytes together so whatever is saved is exactly
+  //    what the "saved" baseline records, even if the user types afterwards.
+  flushPendingEdits();
+  const snapshot = c.text;
+  const data = serializeForSave(c);
+  try{
+    await writeTextToHandle(handle, data);
+  }catch(err){
+    return offerSaveAs(label, `Writing "${handle.name}" failed: ${fsErrorMessage(err)}`);
+  }
+  markSaved(c, snapshot, data);
+  setStatus(`Saved ${label} directly to the original file: ${handle.name}`);
+  return 'saved';
+}
+
+async function saveAsFlow(c, label, col){
+  const suggestedName = (c.fullPath || (col + '.txt')).split(/[\\/]/).pop();
+
+  if(!canPickSave()){
+    // No Save As picker here: plain browser download (NOT an overwrite).
+    flushPendingEdits();
+    downloadFileClassic(serializeForSave(c), suggestedName, col);
+    return 'downloaded';
+  }
+
+  let handle = null;
+  const opts = { suggestedName, id: 'diffmerge-save-' + col };
+  const hint = c.saveHandle || c.lastSaveHandle || c.handle;
+  if(hint) opts.startIn = hint;
+  for(let attempt = 0; attempt < 2 && !handle; attempt++){
+    try{
+      handle = await window.showSaveFilePicker(opts);
+    }catch(err){
+      if(err && err.name === 'AbortError'){
+        setStatus(`${label}: Save As cancelled - nothing changed`);
+        return 'cancelled';
+      }
+      if(err && err.name === 'TypeError' && opts.startIn){ delete opts.startIn; continue; } // unusable startIn hint
+      // The picker itself failed (permission policy, sandboxed frame, ...).
+      // Never fall back silently: tell the user, and download only if they ask.
+      setStatus(`${label}: the Save As picker could not be opened - file NOT saved`, true);
+      const choice = await askChoice(
+        `The Save As dialog could not be opened: ${fsErrorMessage(err)}.\n\nThe file was NOT saved and your changes are still unsaved.\nDownload a copy instead? (A download does not overwrite the original file.)`,
+        [
+          { label:'Download a copy', value:'download', primary:true },
+          { label:'Close', value:'close', focus:true },
+        ],
+        'close'
+      );
+      if(choice === 'download'){
+        flushPendingEdits();
+        downloadFileClassic(serializeForSave(c), suggestedName, col);
+        return 'downloaded';
+      }
+      return 'failed';
+    }
+  }
+  if(!handle) return 'cancelled';
+
+  setStatus(`Saving ${label}...`);
+  flushPendingEdits();
+  const snapshot = c.text;
+  const data = serializeForSave(c);
+  try{
+    await writeTextToHandle(handle, data);
+  }catch(err){
+    // Save target stays as it was; changes remain unsaved.
+    notifyError(`${label}: Save As failed - ${fsErrorMessage(err)}. The file was NOT saved and your changes are still unsaved.`);
+    return 'failed';
+  }
+  c.saveHandle = handle;
+  c.lastSaveHandle = handle;
+  c.handleSource = 'saveAs';
+  c.fullPath = handle.name;
+  markSaved(c, snapshot, data);
+  setStatus(`${label}: saved as new file ${handle.name} - further Saves will write to this file`);
+  return 'saved-as';
 }
 
 function downloadFileClassic(text, suggestedName, col){
-  const blob = new Blob([text], {type:'text/plain'});
+  const blob = new Blob([text], {type:'text/plain;charset=utf-8'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = suggestedName;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  setStatus(`Saved ${colLabel(col)}: ${suggestedName}`);
+  setTimeout(()=>URL.revokeObjectURL(url), 4000);
+  const c = state.cols[col];
+  if(c) c.exportedText = normEol(c.text);
+  setStatus(`${colLabel(col)}: download started (${suggestedName}) - this is a browser download, NOT an overwrite of the original file`);
+}
+
+/* ---------- Refresh / reload ---------- */
+
+// Replace the column with the file's current disk content (discarding edits).
+async function reloadFromHandle(c, handle, label){
+  try{
+    const perm = await ensurePermission(handle, 'read');
+    if(perm !== 'granted'){ notifyError(`${label}: permission denied - can't reload`); return 'failed'; }
+    const file = await handle.getFile();
+    const text = await file.text();
+    setColumnContent(c, text);
+    recompute();
+    setStatus(`Reloaded ${label} from disk: ${file.name}`);
+  }catch(err){
+    notifyError(`${label}: reload failed - ${fsErrorMessage(err)}`);
+    return 'failed';
+  }
 }
 
 async function refreshFile(col){
   const c = state.cols[col];
-  const handle = c.handle;
+  const label = colLabel(col);
+  // After a Save As the current file is the new one, so refresh reads that.
+  const handle = c.saveHandle || c.handle;
 
   if(!handle){
     // No re-readable handle (e.g. file was loaded via the classic file
-    // picker, or never loaded at all) — browsers don't allow re-reading an
+    // picker, or never loaded at all) - browsers don't allow re-reading an
     // arbitrary path for security reasons, so ask the user to pick the file
     // again, same as pressing Enter in the path field.
     if(!c.userLoaded){
-      setStatus(`${colLabel(col)}: nothing to refresh — open a file first`);
+      setStatus(`${label}: nothing to refresh - open a file first`);
       return;
     }
-    setStatus(`${colLabel(col)}: can't auto-refresh this file — please reselect it`, true);
+    setStatus(`${label}: can't auto-refresh this file - please reselect it`, true);
     openFile(col);
     return 'failed'; // lets the Re-diff button report this instead of overwriting it
   }
 
   try{
     // Re-confirm read permission in case it was revoked since the file was opened.
-    if(handle.queryPermission){
-      let perm = await handle.queryPermission({ mode:'read' });
-      if(perm !== 'granted'){
-        perm = await handle.requestPermission({ mode:'read' });
-        if(perm !== 'granted'){
-          setStatus(`${colLabel(col)}: permission denied — can't refresh`, true);
-          return 'failed';
-        }
-      }
+    if(await ensurePermission(handle, 'read') !== 'granted'){
+      setStatus(`${label}: permission denied - can't refresh`, true);
+      return 'failed';
     }
     const file = await handle.getFile();
     const text = await file.text();
-    if(text === c.text){
-      setStatus(`${colLabel(col)}: no changes on disk`);
+    const unchangedOnDisk = (c.diskText !== null && c.diskText !== undefined)
+      ? text === c.diskText
+      : text === c.text;
+    if(unchangedOnDisk){
+      setStatus(`${label}: no changes on disk` + (isDirty(c) ? ' (your unsaved edits are kept)' : ''));
       return;
     }
-    resetHistory(col);
-    c.text = text;
+    if(isDirty(c) && normEol(text) !== normEol(c.text)){
+      const choice = await askChoice(
+        `${label}: "${file.name}" changed on disk, but this column has unsaved edits.`,
+        [
+          { label:'Load disk version (discard my edits)', value:'load', danger:true },
+          { label:'Keep my edits', value:'keep', focus:true },
+        ],
+        'keep'
+      );
+      if(choice !== 'load'){
+        setStatus(`${label}: kept your unsaved edits (disk version not loaded)`);
+        return 'kept';
+      }
+    }
+    setColumnContent(c, text);
     recompute();
-    setStatus(`Refreshed ${colLabel(col)} from disk: ${file.name}`);
+    setStatus(`Refreshed ${label} from disk: ${file.name}`);
   }catch(err){
-    setStatus(`${colLabel(col)}: refresh failed — file may have been moved or deleted`, true);
+    setStatus(`${label}: refresh failed - file may have been moved or deleted`, true);
     return 'failed'; // lets the Re-diff button report this instead of overwriting it
   }
 }
@@ -2627,16 +3083,6 @@ async function getAllDroppedFiles(dt){
   return results;
 }
 
-async function loadFileIntoColumn(col, file, handle){
-  const text = await file.text();
-  resetHistory(col);
-  state.cols[col].text = text;
-  state.cols[col].fullPath = file.webkitRelativePath || file.name;
-  state.cols[col].userLoaded = true;
-  state.cols[col].handle = handle || null; // null if this browser can't give a reusable handle
-  syncPathInput(col);
-}
-
 function setActiveModeButtons(mode){
   document.getElementById('btn-2way').classList.toggle('active', mode==='2way');
   document.getElementById('btn-3way').classList.toggle('active', mode==='3way');
@@ -2658,7 +3104,12 @@ function resetPaneWidths(){
   if(rightEl) rightEl.style.flex = '';
 }
 
+// Read every dropped file, build a per-file label for the status line.
+function droppedName(file){ return file.webkitRelativePath || file.name; }
+
 async function loadDroppedFile(col, dt){
+  // getAllDroppedFiles() grabs every FileSystemFileHandle synchronously off
+  // the drop event (called straight from the 'drop' listener, before any other await).
   const entries = await getAllDroppedFiles(dt);
   if(!entries.length){ setStatus(`${colLabel(col)}: no file detected in the drop`); return; }
 
@@ -2667,32 +3118,59 @@ async function loadDroppedFile(col, dt){
     // regardless of which specific pane/path bar the files landed on.
     const wantMode = entries.length >= 3 ? '3way' : '2way';
     const useCols = wantMode==='3way' ? ['left','mid','right'] : ['left','right'];
+    const used = entries.slice(0, useCols.length);
+    const skipped = entries.slice(useCols.length);
+
+    // 1. Read ALL files first, so a failure can't leave a half-loaded state.
+    const reads = await Promise.allSettled(used.map(en => en.file.text()));
+    const failed = used.filter((en, i) => reads[i].status === 'rejected').map(en => en.file.name);
+    if(failed.length){
+      notifyError(`Drop aborted - could not read: ${failed.join(', ')}. No column was changed.`);
+      return;
+    }
+    // 2. Don't silently throw away unsaved edits.
+    if(!await confirmDiscardFor(useCols, 'Loading the dropped files')){
+      setStatus('Drop cancelled - nothing was changed');
+      return;
+    }
+    // 3. Apply everything.
     state.mode = wantMode;
     setActiveModeButtons(wantMode);
     resetPaneWidths();
-    try{
-      for(let i=0;i<useCols.length;i++){
-        await loadFileIntoColumn(useCols[i], entries[i].file, entries[i].handle);
-      }
-      recompute();
-      focusDefaultCaret(useCols[0]);
-      const summary = useCols.map((c,i)=>`${colLabel(c)}=${entries[i].file.name}`).join(', ');
-      setStatus(`Switched to ${wantMode} and loaded ${useCols.length} files via drag & drop: ${summary}`);
-    }catch(err){
-      setStatus('Failed to read one or more dropped files');
+    useCols.forEach((c, i)=>{
+      applyLoadedFile(c, reads[i].value, droppedName(used[i].file), used[i].handle, 'drop');
+      syncPathInput(c);
+    });
+    recompute();
+    focusDefaultCaret(useCols[0]);
+    const summary = useCols.map((c,i)=>`${colLabel(c)}=${used[i].file.name}`).join(', ');
+    const direct = useCols.filter(c => state.cols[c].saveHandle).length;
+    let msg = `Switched to ${wantMode} and loaded ${useCols.length} files via drag & drop: ${summary}`
+      + ` (direct save available for ${direct} of ${useCols.length})`;
+    if(skipped.length){
+      msg += ` | NOT loaded (only ${useCols.length} columns): ${skipped.map(en=>en.file.name).join(', ')}`;
+      setStatus(msg, true);
+      alert(`Only ${useCols.length} files can be compared at once.\n\nLoaded: ${used.map(en=>en.file.name).join(', ')}\nNot loaded: ${skipped.map(en=>en.file.name).join(', ')}`);
+    }else{
+      setStatus(msg);
     }
     return;
   }
 
   // Single file: load into whichever zone it was dropped on (unchanged behavior)
-  try{
-    await loadFileIntoColumn(col, entries[0].file, entries[0].handle);
-    recompute();
-    focusDefaultCaret(col);
-    setStatus(`Loaded ${colLabel(col)} via drag & drop: ${state.cols[col].fullPath}`);
-  }catch(err){
-    setStatus(`${colLabel(col)}: failed to read dropped file`);
+  const en = entries[0];
+  let text;
+  try{ text = await en.file.text(); }
+  catch(err){ notifyError(`${colLabel(col)}: failed to read dropped file "${en.file.name}". Nothing was changed.`); return; }
+  if(!await confirmDiscardFor([col], 'Loading the dropped file')){
+    setStatus(`${colLabel(col)}: drop cancelled - unsaved changes kept`);
+    return;
   }
+  applyLoadedFile(col, text, droppedName(en.file), en.handle, 'drop');
+  syncPathInput(col);
+  recompute();
+  focusDefaultCaret(col);
+  setStatus(loadedStatus(colLabel(col), state.cols[col].fullPath, !!state.cols[col].saveHandle, 'Loaded via drag & drop'));
 }
 
 function setupDropZone(el, col){
@@ -2993,6 +3471,7 @@ document.querySelectorAll('.pathrow .filebtns .tbtn').forEach(btn=>{
     }
     else if(act==='open') openFile(col);
     else if(act==='save') saveFile(col);
+    else if(act==='saveas') saveFile(col, {saveAs:true});
   });
 });
 
@@ -4158,6 +4637,9 @@ document.addEventListener('keydown', (e)=>{
   } else if(e.key==='y' || e.key==='Y'){
     e.preventDefault();
     redo(col);
+  } else if(e.key==='s' || e.key==='S'){
+    e.preventDefault();
+    if(e.shiftKey ? state.cols[col].userLoaded : isDirty(state.cols[col])) saveFile(col, {saveAs: e.shiftKey});
   }
 });
 
@@ -4174,6 +4656,17 @@ setupAllDropZones();
 setupConnectorResizeHandles();
 recompute();
 setStatus('Ready');
+
+// Warn before leaving the page while any column has edits that were neither
+// written to a file nor downloaded.
+window.addEventListener('beforeunload', (e)=>{
+  flushPendingEdits();
+  const risky = ['left','mid','right'].some(col=>{
+    const c = state.cols[col];
+    return isDirty(c) && normEol(c.text) !== c.exportedText;
+  });
+  if(risky){ e.preventDefault(); e.returnValue = ''; return ''; }
+});
 
 // Re-measure column widths and re-render gutters when window is resized
 window.addEventListener('resize', ()=>{
