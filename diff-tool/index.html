@@ -5,7 +5,7 @@
 <meta name="viewport" id="viewport-meta" content="width=device-width, initial-scale=1.0">
 <script>
 /* Phones / small touch devices: keep the original wide desktop layout
-   instead of reflowing to a narrow screen. A fixed 1100px-wide layout
+   instead of reflowing to a narrow screen. A fixed 1280px-wide layout
    viewport is used (browser auto-fits it to the screen width at first),
    and the user can pan with one finger and pinch-zoom freely. */
 (function(){
@@ -14,7 +14,7 @@
     var isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
     if(isTouch && shortSide < 900){
       document.getElementById('viewport-meta').setAttribute('content',
-        'width=1100, minimum-scale=0.1, maximum-scale=5, user-scalable=yes');
+        'width=1280, minimum-scale=0.1, maximum-scale=5, user-scalable=yes');
       document.documentElement.classList.add('force-desktop');
     }
   }catch(e){ /* ignore */ }
@@ -23,8 +23,9 @@
 <title>Diff Tool</title>
 <meta name="tool-name" content="Diff Tool">
 <meta name="tool-version" content="">
-<meta name="tool-desc" content="Supports drag-and-drop file uploading.">
+<meta name="tool-desc" content="Supports text / directory comparison (runs locally in the browser).">
 <meta name="tool-desc" content="Supports 2-way / 3-way text comparison.">
+<meta name="tool-desc" content="Supports drag-and-drop file uploading.">
 <meta name="tool-desc" content="Identifies discrepancies at block and inline levels.">
 <meta name="tool-desc" content="Provides intuitive action buttons allowing merge discrepancies.">
 <style>
@@ -450,6 +451,7 @@
   .gutter .marker.del{background:var(--diff-del-border);}
   .gutter .marker:hover{opacity:1;outline:1px solid #333;}
   /* viewport indicator */
+  #editor-wrap:not(.has-content) .gutter .viewport-indicator{display:none;}
   .gutter .viewport-indicator{
     position:absolute;left:0;right:0;background:rgba(37,112,194,0.12);
     border-top:1px solid rgba(37,112,194,0.4);border-bottom:1px solid rgba(37,112,194,0.4);
@@ -463,6 +465,8 @@
   }
   .statusbar .status-error{color:#e53935;font-weight:600;}
   .status-right{display:flex;align-items:center;gap:14px;}
+  body.dir-mode .status-right{min-width:0;flex:1;justify-content:flex-end;}
+  body.dir-mode #status-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   #cursor-pos{color:var(--muted);white-space:nowrap;}
   .legend{display:flex;gap:14px;align-items:center;}
   .legend span{display:flex;align-items:center;gap:5px;}
@@ -481,7 +485,7 @@
   }
   .pane{position:relative;}
   .pane.drag-over::after{
-    content:"📂 Drop file to load";
+    content:"📂 Drop file or directory to load";
     position:absolute;
     inset:0;
     display:flex;
@@ -539,24 +543,220 @@
   .fm-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
   .fm-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
   .fm-btn.danger{border-color:#e53935;color:#e53935;}
+
+  /* ======================================================================
+     Directory Compare (Phase 1)
+     ====================================================================== */
+  /* Mode switch (Text Compare / Directory Compare): segmented control that
+     reuses the toolbar button palette. */
+  .mbtn{
+    background:var(--btn-bg);border:1px solid var(--btn-border);color:var(--text);
+    height:32px;padding:0 12px;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap;
+    transition:background .12s,border-color .12s;
+  }
+  .mbtn{width:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;}
+  .mbtn svg{width:18px;height:18px;display:block;}
+  .mbtn:first-child{border-radius:6px 0 0 6px;}
+  .mbtn:last-child{border-radius:0 6px 6px 0;margin-left:-1px;}
+  .mbtn:hover{background:var(--btn-hover);border-color:var(--accent);position:relative;}
+  .mbtn.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600;position:relative;}
+  .mbtn:focus-visible{outline:2px solid var(--accent);outline-offset:1px;position:relative;}
+
+  /* In Directory Compare mode the text-compare chrome is hidden (not
+     destroyed), so its content and scroll state survive a round trip. */
+  body.dir-mode .pathbar,
+  body.dir-mode .editor-wrap,
+  body.dir-mode .text-only{display:none !important;}
+
+  .dir-view{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg);}
+  /* Directory path row: same look as the Text Compare path bar (read-only field
+     + icon button per side, divider strip between them). Uses its own dv-*
+     class names so the text-compare path-bar scripts never pick these up. */
+  .dv-pathbar{background:var(--toolbar);border-bottom:1px solid var(--border);flex-shrink:0;padding-left:30px;}   /* 30px = gutter width */
+  .dv-pathrow{display:flex;align-items:center;}
+  .dv-pathrow .dv-col{flex:1;display:flex;align-items:center;gap:4px;padding:4px 6px;min-width:0;}
+  .dv-pathrow input[type=text]{
+    flex:1;background:var(--input-readonly-bg);border:1px solid var(--border);color:var(--muted);
+    padding:4px 6px;border-radius:3px;font-size:12px;min-width:0;cursor:default;
+  }
+  .dv-pathrow .dv-col-l{flex:var(--dv-wl,1) 1 0px;}
+  .dv-pathrow .dv-col-mid{flex:var(--dv-wm,1) 1 0px;}
+  .dv-pathrow .dv-col-r{flex:var(--dv-wr,1) 1 0px;}
+  .dv-pathrow .dv-filebtns{display:flex;gap:2px;flex-shrink:0;}
+  .dv-pathrow .dv-swap-btn{
+    background:var(--btn-bg);border:1px solid var(--btn-border);color:var(--text);
+    width:32px;height:32px;padding:0;border-radius:6px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    transition:background .12s,border-color .12s;
+  }
+  .dv-pathrow .dv-swap-btn:not(:disabled):hover{background:var(--btn-hover);border-color:var(--accent);}
+  .dv-pathrow .dv-swap-btn:disabled{opacity:.4;cursor:default;pointer-events:none;}
+  .dv-pathrow .dv-swap-btn svg{width:18px;height:18px;display:block;}
+  .dv-pathrow .dv-divider{display:flex;align-items:center;justify-content:center;
+    flex-shrink:0;width:64px;align-self:stretch;background:var(--swap-cell-bg);
+    border-left:1px solid var(--border);border-right:1px solid var(--border);
+  }
+  .dv-btn{
+    background:var(--btn-bg);border:1px solid var(--btn-border);color:var(--text);border-radius:6px;
+    height:32px;padding:0 12px;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap;flex-shrink:0;
+    transition:background .12s,border-color .12s;
+  }
+  .dv-btn:not(:disabled):hover{background:var(--btn-hover);border-color:var(--accent);}
+  .dv-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+  .dv-btn:disabled{opacity:.4;cursor:default;}
+  .dv-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .dv-btn.primary:not(:disabled):hover{filter:brightness(1.1);}
+  .toolbar .group.dir-only{display:none;}
+  body.dir-mode .toolbar .group.dir-only{display:flex;}
+
+  /* Drag & drop zones (same look as Text Compare's "Drop file to load"): dropping a
+     directory on the left / right half of the content area loads that side. */
+  /* [overview gutter | list | overview gutter], like Text Compare's outer gutters */
+  .dv-body{flex:1;min-height:0;display:flex;}
+  .dv-listwrap{position:relative;flex:1;min-height:0;min-width:0;display:flex;flex-direction:column;}
+  /* Column-resize handle (same pill as Text Compare's connector handle): a full-height grab strip centred on a separator. */
+  .dv-handle{position:absolute;top:0;bottom:0;width:7px;cursor:col-resize;z-index:6;}
+  .dv-handle::before{
+    content:"";position:absolute;top:50%;left:50%;width:3px;height:28px;
+    transform:translate(-50%,-50%);border-radius:2px;background:var(--border);
+  }
+  .dv-handle:hover::before,.dv-handle.dragging::before{background:var(--accent);}
+  .dv-drop{
+    position:absolute;top:0;bottom:0;width:calc((100% - var(--dv-sbw,0px)) / 2);display:none;
+    align-items:center;justify-content:center;background:rgba(37,112,194,0.10);
+    border:2px dashed var(--accent);color:var(--accent);font-size:16px;font-weight:600;
+    pointer-events:none;z-index:50;
+  }
+  .dv-drop.left{left:0;}
+  .dv-drop.right{right:var(--dv-sbw,0px);}
+  .dv-listwrap.drop-left .dv-drop.left,
+  .dv-listwrap.drop-mid .dv-drop.mid,
+  .dv-listwrap.drop-right .dv-drop.right{display:flex;}
+  /* 3-way directory compare: three columns */
+  .dv-drop.mid{left:calc((100% - var(--dv-sbw,0px)) / 3);}
+  .dv-listwrap.three .dv-drop{width:calc((100% - var(--dv-sbw,0px)) / 3);}
+  .dv-listwrap:not(.three) .dv-drop.mid{display:none !important;}
+  .dv-listwrap.three .dv-row{grid-template-columns:var(--dv-grid,minmax(0,1fr) 64px minmax(0,1fr) 64px minmax(0,1fr));}
+  .dv-listwrap.three .dv-rows{min-width:760px;}
+  .dv-row.s-mid{background:rgba(142,99,214,0.14);}
+  /* 3-way: every column is coloured on its own, judged against the middle column */
+  /* Cell colours follow Text Compare: the base column (Left in 2-way, Middle in 3-way) is compared with the
+     modified column(s). Blue = deleted, green = added, yellow = modified; hatched = no file on that side. */
+  .dv-cell.c-diff{background:var(--diff-mod-line);}
+  .dv-cell.c-add{background:var(--diff-add-line);}
+  .dv-cell.c-del{background:var(--diff-del-line);}
+  .dv-cell.c-err{background:rgba(229,57,53,0.12);}
+  .dv-cell.none.none-add{background:repeating-linear-gradient(45deg, rgba(76,175,80,0.34) 0, rgba(76,175,80,0.34) 4px, transparent 4px, transparent 8px);}
+  .dv-cell.none.none-del{background:repeating-linear-gradient(45deg, rgba(74,126,194,0.34) 0, rgba(74,126,194,0.34) 4px, transparent 4px, transparent 8px);}
+  /* Row frames are pseudo-elements above the cell backgrounds (an outline on the row gets painted over by them).
+     hover = thin, light frame; selected / keyboard focus = thick, solid frame plus a faint tint. */
+  .dv-row::before,.dv-row::after{content:'';position:absolute;inset:0;box-sizing:border-box;pointer-events:none;z-index:5;display:none;}
+  .dv-row.clickable:hover::before{display:block;border:1px solid var(--accent);opacity:.5;}
+  .dv-row.selected::after{display:block;border:2px solid var(--accent);background:var(--current-line-bg);}
+  .s-mid .dv-st i, .dv-chip.s-mid i{background:#8e63d6;}
+  .dv-col.drag-over{outline:2px dashed var(--accent);outline-offset:-2px;background:rgba(37,112,194,0.10);}
+  .dv-list{flex:1;min-height:0;overflow:auto;background:var(--panel);position:relative;}
+  .dv-row{display:grid;/* centre strip is 64px, same as the path row's divider above, so the dividing lines line up */
+    grid-template-columns:var(--dv-grid,minmax(0,1fr) 64px minmax(0,1fr));height:28px;align-items:stretch;}
+  .dv-rows{position:relative;min-width:640px;}
+  .dv-row{position:absolute;left:0;right:0;}
+  .dv-row.s-diff{background:var(--diff-mod-line);}
+  .dv-row.s-left{background:var(--diff-del-line);}
+  .dv-row.s-right{background:var(--diff-add-line);}
+  .dv-row.clickable{cursor:pointer;}
+  .dv-list:focus{outline:none;}
+  .dv-row.dir .dv-path{font-weight:600;}
+  .dv-cell{position:relative;display:flex;align-items:center;gap:6px;min-width:0;padding-right:12px;overflow:hidden;}
+  .dv-cell.none{background:repeating-linear-gradient(45deg,var(--empty-stripe),var(--empty-stripe) 6px,transparent 6px,transparent 12px);}
+  .dv-mid{position:relative;display:flex;align-items:center;justify-content:center;background:var(--swap-cell-bg);border-left:1px solid var(--border);border-right:1px solid var(--border);padding:0 !important;}
+  /* Dotted hierarchy guide lines (vertical = sibling/parent link, horizontal = branch to the entry). */
+  .dv-vl{position:absolute;width:0;border-left:1px dotted var(--muted);opacity:.75;pointer-events:none;}
+  .dv-hl{position:absolute;top:50%;height:0;border-top:1px dotted var(--muted);opacity:.75;pointer-events:none;}
+  .dv-chev{width:18px;flex-shrink:0;text-align:center;color:var(--muted);font-size:16px;line-height:1;}
+  .dv-ico{width:14px;height:14px;flex-shrink:0;color:var(--muted);}
+  .dv-path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .dv-size{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:12px;}
+  .dv-st i{
+    display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:3px;
+    font-style:normal;font-weight:700;font-size:11px;line-height:1;color:#fff;background:var(--muted);flex-shrink:0;
+  }
+  .s-same .dv-st i, .dv-chip.s-same i{background:var(--muted);}
+  .s-diff .dv-st i, .dv-chip.s-diff i{background:var(--diff-mod-border);color:#1e1f22;}
+  .s-left .dv-st i, .dv-chip.s-left i{background:var(--diff-del-border);}
+  .s-right .dv-st i, .dv-chip.s-right i{background:var(--diff-add-border);}
+  .s-err .dv-st i, .dv-chip.s-err i{background:#e53935;}
+  .dv-chip i{
+    display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:3px;
+    font-style:normal;font-weight:700;font-size:11px;line-height:1;color:#fff;
+  }
+  .dv-chip.s-diff i{color:#1e1f22;}
+  /* Default screen (nothing to list yet): empty columns with their separator strip(s), like Text Compare's
+     empty panes, each with a "drag and drop" hint until that side has a directory. */
+  .dv-skeleton{position:absolute;inset:0;min-width:640px;display:grid;grid-template-columns:var(--dv-grid,minmax(0,1fr) 64px minmax(0,1fr));pointer-events:none;}
+  .dv-listwrap.three .dv-skeleton{min-width:760px;grid-template-columns:var(--dv-grid,minmax(0,1fr) 64px minmax(0,1fr) 64px minmax(0,1fr));}
+  .dv-skeleton .dv-hint{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:14px;min-width:0;padding:0 8px;text-align:center;}
+  .dv-skeleton .dv-hint.off{visibility:hidden;}
+  .dv-listwrap:not(.three) .dv-sk-3{display:none;}
+  /* Copy / delete arrows in the separator column, same look as Text Compare's merge buttons. */
+  .dv-act{
+    position:absolute;top:50%;transform:translateY(-50%);width:18px;height:18px;border-radius:4px;
+    background:var(--btn-bg);border:1px solid var(--btn-border);color:var(--text);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;line-height:1;padding:0;
+    transition:background .12s,border-color .12s;
+  }
+  .dv-act:hover{background:var(--btn-hover);border-color:var(--accent);}
+  .dv-act svg{width:18px;height:18px;display:block;pointer-events:none;}
+  .dv-act.to-right{left:1px;}
+  .dv-act.to-left{right:1px;}
+  /* Live state of each column (scanning / comparing ...), centred in that column's content area. It sits above
+     the rows and does not scroll with them; the right edge leaves room for the list's scrollbar. */
+  .dv-state{position:absolute;top:0;bottom:0;left:0;right:var(--dv-sbw,0px);min-width:640px;display:grid;
+    grid-template-columns:var(--dv-grid,minmax(0,1fr) 64px minmax(0,1fr));pointer-events:none;z-index:4;}
+  .dv-listwrap.three .dv-state{min-width:760px;grid-template-columns:var(--dv-grid,minmax(0,1fr) 64px minmax(0,1fr) 64px minmax(0,1fr));}
+  .dv-state .dv-stcell{display:flex;align-items:center;justify-content:center;min-width:0;padding:0 8px;}
+  .dv-state .dv-stcell span{max-width:100%;padding:6px 12px;border-radius:6px;font-size:14px;line-height:1.4;text-align:center;
+    color:var(--muted);background:var(--panel);border:1px solid var(--border);overflow-wrap:anywhere;}
+  .dv-state .dv-stcell span:empty{display:none;}
+  .dv-empty{
+    position:absolute;left:0;right:0;top:0;padding:36px 24px;text-align:center;color:var(--muted);
+    line-height:1.6;pointer-events:none;
+  }
+  @media (prefers-reduced-motion:reduce){ .mbtn,.dv-btn{transition:none;} }
 </style>
 </head>
 <body>
 
 <!-- ============ TOP TOOLBAR ============ -->
 <div class="toolbar">
-  <div class="group">
-    <button class="tbtn active" id="btn-2way" title="2-way compare"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="5" width="16" height="14" rx="1.5"/><line x1="12" y1="5" x2="12" y2="19"/></svg></button>
-    <button class="tbtn" id="btn-3way" title="3-way compare"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="1.5"/><line x1="9" y1="5" x2="9" y2="19"/><line x1="15" y1="5" x2="15" y2="19"/></svg></button>
+  <div class="group" role="group" aria-label="Comparison mode">
+    <button type="button" class="mbtn active" id="mode-text" aria-pressed="true" title="Text Compare" aria-label="Text Compare"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/></svg></button>
+    <button type="button" class="mbtn" id="mode-dir" aria-pressed="false" title="Directory Compare" aria-label="Directory Compare"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></svg></button>
   </div>
-  <div class="group">
+  <div class="group dir-only" role="group" aria-label="Directory comparison layout">
+    <button type="button" class="mbtn active" id="dv-mode-2way"></button>
+    <button type="button" class="mbtn" id="dv-mode-3way"></button>
+  </div>
+  <div class="group dir-only" role="group" aria-label="Difference navigation">
+    <button type="button" class="tbtn" id="dv-nav-first" disabled></button>
+    <button type="button" class="tbtn" id="dv-nav-prev" disabled></button>
+    <button type="button" class="tbtn" id="dv-nav-next" disabled></button>
+    <button type="button" class="tbtn" id="dv-nav-last" disabled></button>
+  </div>
+  <div class="group dir-only">
+    <button type="button" class="tbtn" id="dv-compare" disabled title="Re-compare" aria-label="Re-compare"></button>
+  </div>
+  <div class="group text-only">
+    <button class="mbtn active" id="btn-2way" title="2-way compare"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="5" width="16" height="14" rx="1.5"/><line x1="12" y1="5" x2="12" y2="19"/></svg></button>
+    <button class="mbtn" id="btn-3way" title="3-way compare"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="1.5"/><line x1="9" y1="5" x2="9" y2="19"/><line x1="15" y1="5" x2="15" y2="19"/></svg></button>
+  </div>
+  <div class="group text-only">
     <button class="tbtn" id="nav-first" title="First difference"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 17 12 11 18 17"/><polyline points="6 11 12 5 18 11"/></svg></button>
     <button class="tbtn" id="nav-prev" title="Previous difference"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
     <button class="tbtn" id="nav-next" title="Next difference"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
     <button class="tbtn" id="nav-last" title="Last difference"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 7 12 13 18 7"/><polyline points="6 13 12 19 18 13"/></svg></button>
   </div>
-  <div class="group">
-    <button class="tbtn" id="btn-recompute" title="Re-run diff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
+  <div class="group text-only">
+    <button class="tbtn" id="btn-recompute" title="Re-compare"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.9-3.5M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.9 3.5M20 20v-4h-4"/></svg></button>
   </div>
   <div class="group" style="margin-left:auto;border-right:none;">
     <button class="tbtn" id="btn-theme" title="Toggle light / dark mode">
@@ -574,7 +774,7 @@
       <div class="filebtns">
         <button class="tbtn" data-act="undo" data-col="left" title="Undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a6 6 0 0 1 0 12H9"/></svg></button>
         <button class="tbtn" data-act="redo" data-col="left" title="Redo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a6 6 0 0 0 0 12h6"/></svg></button>
-        <button class="tbtn" data-act="refresh" data-col="left" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
+        <button class="tbtn" data-act="refresh" data-col="left" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.9-3.5M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.9 3.5M20 20v-4h-4"/></svg></button>
         <button class="tbtn" data-act="open" data-col="left" title="Open"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18V5a1 1 0 0 1 1-1h5l2 2h7a1 1 0 0 1 1 1v2"/><path d="M3.2 19.2L6 10.4a1 1 0 0 1 .95-.7H21a1 1 0 0 1 .95 1.3L19.5 18.6a1 1 0 0 1-.95.7H4.2a1 1 0 0 1-1-1.1z" transform="translate(0 -0.3)"/></svg></button>
         <button class="tbtn" data-act="save" data-col="left" title="Save"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></button>
         <button class="tbtn" data-act="saveas" data-col="left" title="Save As..."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/><g stroke="var(--btn-bg)" stroke-width="5"><path d="M11 17h10M17 13l4 4-4 4"/></g><path d="M11 17h10M17 13l4 4-4 4"/></svg></button>
@@ -591,7 +791,7 @@
       <div class="filebtns">
         <button class="tbtn" data-act="undo" data-col="mid" title="Undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a6 6 0 0 1 0 12H9"/></svg></button>
         <button class="tbtn" data-act="redo" data-col="mid" title="Redo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a6 6 0 0 0 0 12h6"/></svg></button>
-        <button class="tbtn" data-act="refresh" data-col="mid" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
+        <button class="tbtn" data-act="refresh" data-col="mid" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.9-3.5M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.9 3.5M20 20v-4h-4"/></svg></button>
         <button class="tbtn" data-act="open" data-col="mid" title="Open"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18V5a1 1 0 0 1 1-1h5l2 2h7a1 1 0 0 1 1 1v2"/><path d="M3.2 19.2L6 10.4a1 1 0 0 1 .95-.7H21a1 1 0 0 1 .95 1.3L19.5 18.6a1 1 0 0 1-.95.7H4.2a1 1 0 0 1-1-1.1z" transform="translate(0 -0.3)"/></svg></button>
         <button class="tbtn" data-act="save" data-col="mid" title="Save"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></button>
         <button class="tbtn" data-act="saveas" data-col="mid" title="Save As..."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/><g stroke="var(--btn-bg)" stroke-width="5"><path d="M11 17h10M17 13l4 4-4 4"/></g><path d="M11 17h10M17 13l4 4-4 4"/></svg></button>
@@ -605,7 +805,7 @@
       <div class="filebtns">
         <button class="tbtn" data-act="undo" data-col="right" title="Undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a6 6 0 0 1 0 12H9"/></svg></button>
         <button class="tbtn" data-act="redo" data-col="right" title="Redo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a6 6 0 0 0 0 12h6"/></svg></button>
-        <button class="tbtn" data-act="refresh" data-col="right" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
+        <button class="tbtn" data-act="refresh" data-col="right" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.9-3.5M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.9 3.5M20 20v-4h-4"/></svg></button>
         <button class="tbtn" data-act="open" data-col="right" title="Open"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18V5a1 1 0 0 1 1-1h5l2 2h7a1 1 0 0 1 1 1v2"/><path d="M3.2 19.2L6 10.4a1 1 0 0 1 .95-.7H21a1 1 0 0 1 .95 1.3L19.5 18.6a1 1 0 0 1-.95.7H4.2a1 1 0 0 1-1-1.1z" transform="translate(0 -0.3)"/></svg></button>
         <button class="tbtn" data-act="save" data-col="right" title="Save"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></button>
         <button class="tbtn" data-act="saveas" data-col="right" title="Save As..."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/><g stroke="var(--btn-bg)" stroke-width="5"><path d="M11 17h10M17 13l4 4-4 4"/></g><path d="M11 17h10M17 13l4 4-4 4"/></svg></button>
@@ -633,6 +833,67 @@
     <div class="pane-empty-hint" id="empty-right">Drag and drop a file here</div>
   </div>
   <div class="gutter" id="gutter-mr"><div class="gutter-track" id="gutter-mr-track"></div></div>
+</div>
+
+<!-- ============ DIRECTORY COMPARE VIEW ============ -->
+<input type="file" id="dv-input" class="hidden" webkitdirectory multiple>
+<div class="dir-view hidden" id="dir-view">
+  <div class="dv-pathbar" id="dv-pathbar">
+   <div class="dv-pathrow">
+    <div class="dv-col dv-col-l">
+      <input type="text" id="dv-name-left" placeholder="Left directory" readonly>
+      <div class="dv-filebtns">
+        <button type="button" class="tbtn" id="dv-refresh-left" data-side="left" title="Refresh" aria-label="Refresh Left directory" disabled></button>
+        <button type="button" class="tbtn" id="dv-pick-left" title="Select Left Directory" aria-label="Select Left Directory"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18V5a1 1 0 0 1 1-1h5l2 2h7a1 1 0 0 1 1 1v2"/><path d="M3.2 19.2L6 10.4a1 1 0 0 1 .95-.7H21a1 1 0 0 1 .95 1.3L19.5 18.6a1 1 0 0 1-.95.7H4.2a1 1 0 0 1-1-1.1z" transform="translate(0 -0.3)"/></svg></button>
+      </div>
+    </div>
+    <div class="dv-divider"><button type="button" class="dv-swap-btn" id="dv-swap-1" data-swap-a="left" data-swap-b="right"></button></div>
+    <div class="dv-col dv-col-mid hidden">
+      <input type="text" id="dv-name-mid" placeholder="Middle directory" readonly>
+      <div class="dv-filebtns">
+        <button type="button" class="tbtn" id="dv-refresh-mid" data-side="mid" title="Refresh" aria-label="Refresh Middle directory" disabled></button>
+        <button type="button" class="tbtn" id="dv-pick-mid" title="Select Middle Directory" aria-label="Select Middle Directory"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18V5a1 1 0 0 1 1-1h5l2 2h7a1 1 0 0 1 1 1v2"/><path d="M3.2 19.2L6 10.4a1 1 0 0 1 .95-.7H21a1 1 0 0 1 .95 1.3L19.5 18.6a1 1 0 0 1-.95.7H4.2a1 1 0 0 1-1-1.1z" transform="translate(0 -0.3)"/></svg></button>
+      </div>
+    </div>
+    <div class="dv-divider dv-div-mid hidden"><button type="button" class="dv-swap-btn" id="dv-swap-2" data-swap-a="mid" data-swap-b="right"></button></div>
+    <div class="dv-col dv-col-r">
+      <input type="text" id="dv-name-right" placeholder="Right directory" readonly>
+      <div class="dv-filebtns">
+        <button type="button" class="tbtn" id="dv-refresh-right" data-side="right" title="Refresh" aria-label="Refresh Right directory" disabled></button>
+        <button type="button" class="tbtn" id="dv-pick-right" title="Select Right Directory" aria-label="Select Right Directory"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18V5a1 1 0 0 1 1-1h5l2 2h7a1 1 0 0 1 1 1v2"/><path d="M3.2 19.2L6 10.4a1 1 0 0 1 .95-.7H21a1 1 0 0 1 .95 1.3L19.5 18.6a1 1 0 0 1-.95.7H4.2a1 1 0 0 1-1-1.1z" transform="translate(0 -0.3)"/></svg></button>
+      </div>
+    </div>
+   </div>
+  </div>
+  <div class="dv-body">
+  <div class="gutter dv-gutter" id="dv-gutter-l" title="Overview of the differences"><div class="gutter-track" id="dv-gutter-l-track"></div></div>
+  <div class="dv-listwrap" id="dv-listwrap">
+  <div class="dv-list" id="dv-list" tabindex="0" role="tree" aria-label="Directory comparison">
+    <div class="dv-skeleton" id="dv-skeleton" aria-hidden="true">
+      <div class="dv-hint" id="dv-hint-left">Drag and drop a directory here</div>
+      <div class="dv-mid"></div>
+      <div class="dv-hint dv-sk-3" id="dv-hint-mid">Drag and drop a directory here</div>
+      <div class="dv-mid dv-sk-3"></div>
+      <div class="dv-hint" id="dv-hint-right">Drag and drop a directory here</div>
+    </div>
+    <div class="dv-rows" id="dv-rows"></div>
+    <div class="dv-empty" id="dv-empty"></div>
+  </div>
+    <div class="dv-state" id="dv-state" aria-hidden="true">
+      <div class="dv-stcell"><span id="dv-state-left"></span></div>
+      <div></div>
+      <div class="dv-stcell dv-sk-3"><span id="dv-state-mid"></span></div>
+      <div class="dv-sk-3"></div>
+      <div class="dv-stcell"><span id="dv-state-right"></span></div>
+    </div>
+    <div class="dv-handle" id="dv-handle-1" title="Drag to resize"></div>
+    <div class="dv-handle hidden" id="dv-handle-2" title="Drag to resize"></div>
+    <div class="dv-drop left" aria-hidden="true">📂 Drop file or directory to load</div>
+    <div class="dv-drop mid" aria-hidden="true">📂 Drop file or directory to load</div>
+    <div class="dv-drop right" aria-hidden="true">📂 Drop file or directory to load</div>
+  </div>
+  <div class="gutter dv-gutter" id="dv-gutter-r" title="Overview of the differences"><div class="gutter-track" id="dv-gutter-r-track"></div></div>
+  </div>
 </div>
 
 <!-- ============ STATUS BAR ============ -->
@@ -972,6 +1233,25 @@ function buildDiffBlocks(){
   }
   if(cur) blocks.push(cur);
   state.diffBlocks = blocks;
+}
+
+/* Identity of the diff a row belongs to, for ONE column: its status plus, for the
+   mid (base) column in 3-way mode, WHICH other columns it differs from. Two
+   neighbouring rows of the mid column that are both 'mod' but caused by
+   different diffs (e.g. one differs only from right, the next only from left)
+   get different tokens, so they are framed / given merge buttons as separate
+   diff blocks instead of one. Left/right only ever compare against mid, so for
+   them the status alone is the identity. */
+function segToken(i, col){
+  const r = state.rows[i];
+  if(!r || !r._cls) return 'equal';
+  const c = r._cls;
+  const st = c[col];
+  if(st==='equal' || st===undefined) return 'equal';
+  if(col==='mid' && state.mode==='3way'){
+    return st + '|' + (c.left!=='equal'?1:0) + (c.right!=='equal'?1:0);
+  }
+  return st;
 }
 
 /* After buildDiffBlocks has grouped a 'mod' row together with a directly
@@ -1539,8 +1819,9 @@ function renderColumn(col){
       const s = statusAt(i);
       if(s==='equal') continue;
       if(!rows[i][col]) continue; // this row itself is a gap marker, handled by its own unconditional colored line
-      if(statusAt(i-1) !== s && !isGapNeighbor(i-1)) blockStartRows.add(i);
-      if(statusAt(i+1) !== s && !isGapNeighbor(i+1)) blockEndRows.add(i);
+      const tk = segToken(i, col);
+      if(segToken(i-1, col) !== tk && !isGapNeighbor(i-1)) blockStartRows.add(i);
+      if(segToken(i+1, col) !== tk && !isGapNeighbor(i+1)) blockEndRows.add(i);
     }
   }
 
@@ -1587,6 +1868,7 @@ function renderColumn(col){
     const cell = row[col];
     const cls = row._cls;
     const status = cls ? cls[col] : 'equal';
+    const token = segToken(i, col);
     // "Current diff" navigation highlight: only meaningful on a column that
     // actually differs at this row. state.diffBlocks groups rows where ANY
     // column differs, so a block's start row can still be 'equal' for a
@@ -1608,19 +1890,20 @@ function renderColumn(col){
     if(!cell){
       // Gap row: accumulate into the pending marker instead of rendering a blank line
       if(status==='add' || status==='del' || status==='mod'){
+        if(pendingGap && pendingGap.token !== token) flushGap();   // a different diff starts here
         if(!pendingGap){
-          if(status !== lastRunStatus){
+          if(token !== lastRunStatus){
             // Type changed since the last segment (e.g. right after a
             // "modified" real line) -- this gap starts a new visual
             // segment of its own and should get its own button set.
             shownButtonForRun = false;
           }
-          pendingGap = {type:status, current:false, rowIdx:i, leftHasContent:false, rightHasContent:false, showButton: !shownButtonForRun, blockStart:false, blockEnd:false};
+          pendingGap = {type:status, current:false, rowIdx:i, leftHasContent:false, rightHasContent:false, showButton: !shownButtonForRun, blockStart:false, blockEnd:false, token};
           if(pendingGap.showButton) shownButtonForRun = true;
         } else {
           pendingGap.type = status;
         }
-        lastRunStatus = status;
+        lastRunStatus = token;
         if(isCurrent) pendingGap.current = true;
         if(row.left) pendingGap.leftHasContent = true;
         if(row.right) pendingGap.rightHasContent = true;
@@ -1691,7 +1974,7 @@ function renderColumn(col){
     // status!=='equal' too means a column only gets a button on rows where
     // it genuinely has something to merge or delete.
     if(cls && cls.anyDiff && status !== 'equal'){
-      if(status !== lastRunStatus){
+      if(token !== lastRunStatus){
         // Type changed since the last segment (e.g. this "modified" line
         // comes right after a "deleted" gap) -- it starts a new visual
         // segment of its own and should get its own button set.
@@ -1707,7 +1990,7 @@ function renderColumn(col){
         registerActionButtons(i, col, effHasLeftPane, effHasRightPane, false);
         shownButtonForRun = true;
       }
-      lastRunStatus = status;
+      lastRunStatus = token;
     }
 
     html += `<div class="${lineClasses}" data-row="${i}" data-col="${col}">`
@@ -1962,6 +2245,11 @@ function renderConnectors(){
    pane; gutter-mr-track always sits beside the right pane, in both 2-way
    and 3-way modes (see the ownCol args passed in renderGutters). */
 function updateGutterViewport(){
+  // With nothing loaded yet the viewport box would cover the whole (empty) gutter as a bluish layer; only
+  // show it once there is content to look at.
+  const wrap = document.getElementById('editor-wrap');
+  if(wrap) wrap.classList.toggle('has-content', ['left','mid','right'].some(c =>
+    state.cols[c] && (state.cols[c].userLoaded || (state.cols[c].text && state.cols[c].text.length))));
   const gutters = [
     { trackId:'gutter-lm-track', ownCol:'left',  scrollId:'scroll-left'  },
     { trackId:'gutter-mr-track', ownCol:'right', scrollId:'scroll-right' },
@@ -2203,10 +2491,7 @@ function goToDiff(target){
    up doing the exact same merge/delete. */
 function findSegmentForRow(rowIdx, col){
   const rows = state.rows;
-  const statusAt = i => {
-    const r = rows[i];
-    return (r && r._cls) ? r._cls[col] : 'equal';
-  };
+  const statusAt = i => segToken(i, col);
   const status = statusAt(rowIdx);
   if(status === 'equal') return {start:rowIdx, end:rowIdx};
   let start = rowIdx, end = rowIdx;
@@ -3217,6 +3502,7 @@ function setupAllDropZones(){
 function setStatus(msg, isError){
   const el = document.getElementById('status-text');
   el.textContent = msg;
+  el.title = msg;
   el.classList.toggle('status-error', !!isError);
 }
 
@@ -3420,9 +3706,10 @@ document.getElementById('nav-last').addEventListener('click', ()=>goToDiff('last
 document.addEventListener('keydown', (e)=>{
   if(!e.altKey || e.shiftKey) return;
   if(e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  const prefix = document.body.classList.contains('dir-mode') ? 'dv-nav-' : 'nav-';   // Directory Compare has its own buttons
   const btnId = (e.ctrlKey || e.metaKey)
-    ? (e.key==='ArrowUp' ? 'nav-first' : 'nav-last')
-    : (e.key==='ArrowUp' ? 'nav-prev' : 'nav-next');
+    ? (e.key==='ArrowUp' ? prefix + 'first' : prefix + 'last')
+    : (e.key==='ArrowUp' ? prefix + 'prev' : prefix + 'next');
   e.preventDefault();
   const btn = document.getElementById(btnId);
   if(btn) btn.click();
@@ -4674,6 +4961,1769 @@ window.addEventListener('resize', ()=>{
   rebuildColumnLayouts();
   renderGutters();
 });
+
+/* ======================================================================
+   Directory Compare
+   Kept separate from the text-compare state: everything below lives in its
+   own closure and only touches the text-compare side through the existing
+   helpers (applyLoadedFile / recompute / confirmDiscardFor ...).
+   Everything runs locally in the browser; nothing is uploaded.
+   ====================================================================== */
+(function(){
+  'use strict';
+
+  const ROW_H = 28;                    // px, must match .dv-row height in CSS
+  const CHUNK_BYTES = 4 * 1024 * 1024; // content comparison reads 4 MiB at a time
+  const SNIFF_BYTES = 8192;            // bytes inspected to detect binary files
+  const MAX_DIFF_CELLS = 25e6;         // lineCountLeft * lineCountRight before warning (LCS table size)
+  const CANCELLED = { cancelled: true };
+
+  const STATUS = {
+    same:      { label: 'Same',       glyph: '=',      cls: 's-same'  },
+    different: { label: 'Different',  glyph: '\u2260', cls: 's-diff'  },
+    left:      { label: 'Left Only',  glyph: '\u2190', cls: 's-left'  },
+    mid:       { label: 'Middle Only', glyph: '\u2193', cls: 's-mid'   },
+    right:     { label: 'Right Only', glyph: '\u2192', cls: 's-right' },
+    error:     { label: 'Error',      glyph: '!',      cls: 's-err'   },
+  };
+
+  /* ---------- Directory Compare state (separate from `state`) ---------- */
+  function newSide(){
+    return { name: '', handle: null, producer: null, rescannable: false, files: null, dirs: null, errors: [], scanning: false, scanId: 0, progress: 0 };
+  }
+  const dc = {
+    left: newSide(),
+    mid: newSide(),
+    right: newSide(),
+    mode: '2way',         // '2way' | '3way' (Directory Compare's own setting)
+    fr: [1, 1, 1],        // relative column widths (pixel-weighted once a handle has been dragged)
+    results: null,        // null = not compared yet
+    tree: null,           // merged folder tree built from results
+    diffNodes: [],        // leaf entries (files / empty folders) that are not 'same', in tree order
+    nodeByKey: null,
+    visible: [],          // flattened, currently visible tree nodes
+    comparing: false,
+    runId: 0,
+    selectedKey: null,    // 'kind:path' of the selected row (file or folder)
+    opening: false,
+    view: 'text',         // 'text' | 'dir'
+    savedScroll: null,
+    fallbackSide: null,
+    staleNote: '',        // shown with the next comparison result (fallback sides cannot be re-read)
+    keepStale: false,
+    keepView: false,      // Refresh of one column: keep the other columns on screen until the new result is ready
+  };
+
+  const $ = id => document.getElementById(id);
+  const sideLabel = side => side === 'left' ? 'Left' : side === 'mid' ? 'Middle' : 'Right';
+  const SK = { left: 'L', mid: 'M', right: 'R' };                    // suffix of the per-side tree fields
+  const KS = { L: 'left', M: 'mid', R: 'right' };
+  const activeSides = () => dc.mode === '3way' ? ['left', 'mid', 'right'] : ['left', 'right'];
+  const yieldUi = () => new Promise(r => setTimeout(r, 0));
+  const nextFrame = () => new Promise(r => requestAnimationFrame(() => r()));
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  function describeError(err){
+    const n = err && err.name;
+    if(n === 'NotAllowedError' || n === 'SecurityError') return 'permission was denied or is no longer valid';
+    if(n === 'NotFoundError') return 'the file or directory no longer exists';
+    if(n === 'NotReadableError') return 'it could not be read (it may have changed or be locked by another program)';
+    return (err && err.message) || String(err);
+  }
+
+  function formatSize(n){
+    if(n === null || n === undefined) return '-';
+    if(n < 1024) return n + ' B';
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let v = n / 1024, i = 0;
+    while(v >= 1024 && i < units.length - 1){ v /= 1024; i++; }
+    return (v >= 100 ? v.toFixed(0) : v.toFixed(1)) + ' ' + units[i];
+  }
+
+  // All Directory Compare messages (progress, warnings, errors, results) go to the status bar.
+  // An empty text leaves the current status alone.
+  function setMsg(text, isError){ if(text) setStatus(text, !!isError); }
+  function setProgress(text){ if(text) setStatus(text); }
+
+  const pickerSupported = () => typeof window.showDirectoryPicker === 'function';
+  const fallbackSupported = () => 'webkitdirectory' in document.createElement('input');
+
+  /* ---------- Mode switch ---------- */
+  function setViewMode(mode){
+    if(mode === dc.view) return;
+    const body = document.body;
+    if(mode === 'dir'){
+      try{ flushPendingEdits(); }catch(_){ /* nothing pending */ }
+      // display:none resets scroll offsets, so remember them for the way back.
+      dc.savedScroll = ['left','mid','right'].map(c => {
+        const el = $('scroll-' + c);
+        return el ? [el.scrollTop, el.scrollLeft] : [0, 0];
+      });
+      body.classList.add('dir-mode');
+      $('dir-view').classList.remove('hidden');
+      dc.view = 'dir';
+      paintRows(true);
+    } else {
+      body.classList.remove('dir-mode');
+      $('dir-view').classList.add('hidden');
+      dc.view = 'text';
+      // The panes were hidden: let the existing resize logic re-measure them.
+      window.dispatchEvent(new Event('resize'));
+      if(dc.savedScroll){
+        ['left','mid','right'].forEach((c, i) => {
+          const el = $('scroll-' + c);
+          if(el && dc.savedScroll[i]){ el.scrollTop = dc.savedScroll[i][0]; el.scrollLeft = dc.savedScroll[i][1]; }
+        });
+      }
+    }
+    $('mode-text').classList.toggle('active', dc.view === 'text');
+    $('mode-dir').classList.toggle('active', dc.view === 'dir');
+    $('mode-text').setAttribute('aria-pressed', String(dc.view === 'text'));
+    $('mode-dir').setAttribute('aria-pressed', String(dc.view === 'dir'));
+    setStatus(dc.view === 'dir' ? 'Directory Compare' : 'Text Compare');
+  }
+
+  /* ---------- Selecting a directory ---------- */
+  async function selectDirectory(side){
+    const label = sideLabel(side);
+    if(pickerSupported()){
+      let handle;
+      try{
+        handle = await window.showDirectoryPicker({ mode: 'read' });
+      }catch(err){
+        if(err && err.name === 'AbortError'){ setMsg(`${label}: directory selection cancelled.`); return; }
+        // Blocked (e.g. embedded frame / permissions policy): use the classic folder input instead.
+        if(fallbackSupported()){ dc.fallbackSide = side; $('dv-input').click(); return; }
+        setMsg(`${label}: could not open the directory picker - ${describeError(err)}.`, true);
+        return;
+      }
+      await runScan(side, handle.name, handle, ctl => scanDirectory(handle, ctl));
+      return;
+    }
+    if(!fallbackSupported()){
+      setMsg('This browser cannot select directories. Use a recent version of Chrome, Edge, Firefox or Safari.', true);
+      return;
+    }
+    dc.fallbackSide = side;
+    $('dv-input').click();
+  }
+
+  // Fallback: <input webkitdirectory>. Files are only read locally by the browser.
+  $('dv-input').addEventListener('change', (e) => {
+    const side = dc.fallbackSide;
+    const list = Array.from(e.target.files || []);   // copy before resetting the input
+    e.target.value = '';
+    dc.fallbackSide = null;
+    if(!side) return;
+    if(!list.length){
+      setMsg(`${sideLabel(side)}: no files were selected (the folder is empty, or the selection was cancelled).`);
+      return;
+    }
+    const rootName = (list[0].webkitRelativePath || '').split('/')[0] || 'Selected folder';
+    runScan(side, rootName, null, ctl => scanFileList(list, ctl), false);
+  });
+
+  // rescannable: false for the <input webkitdirectory> fallback, whose FileList is a one-time snapshot.
+  async function runScan(side, name, handle, producer, rescannable = true, keepView = false){
+    const s = dc[side];
+    const id = ++s.scanId;            // supersedes any scan still running for this side
+    // Results no longer match the selection. Normally they are cleared; when only one column is refreshed the
+    // other columns stay on screen (that column alone shows up empty) until the new comparison is ready.
+    const keep = keepView && !!dc.results;
+    const prev = keep ? dc.results : null;
+    cancelCompare(true);
+    if(!keep) clearResults();
+    dc.keepView = keep;
+    if(!dc.keepStale) dc.staleNote = '';
+    s.name = name; s.handle = handle; s.producer = producer; s.rescannable = rescannable; s.files = null; s.dirs = null; s.errors = []; s.scanning = true; s.progress = 0;
+    updateSideUI(side);
+    updateCompareButton();
+    setMsg('');
+    if(keep) previewWithout(side, prev);
+    const ctl = {
+      check(){ if(s.scanId !== id) throw CANCELLED; },
+      progress(n){ s.progress = n; updateSideUI(side); },
+    };
+    try{
+      const out = await producer(ctl);
+      ctl.check();
+      s.files = buildFileIndex(out.files);
+      s.dirs = new Map((out.dirs || []).map(d => [d.path, d]));   // every directory, flagged empty or not
+      s.errors = out.errors;
+      if(out.errors.length){
+        setMsg(`${sideLabel(side)}: ${out.errors.length} item(s) could not be read and are flagged as Error.`, true);
+      } else if(s.files.size === 0 && s.dirs.size === 0){
+        setMsg(`${sideLabel(side)}: the selected directory is empty.`);
+      }
+    }catch(err){
+      if(err === CANCELLED) return;
+      s.files = null;
+      setMsg(`${sideLabel(side)}: scanning failed - ${describeError(err)}.`, true);
+    }finally{
+      if(s.scanId === id){
+        s.scanning = false;
+        updateSideUI(side);
+        updateCompareButton();
+        updateHint();
+        maybeAutoCompare();
+        if(!s.files) dc.keepView = false;          // the scan failed: nothing more is coming
+      }
+    }
+  }
+
+  // Compare automatically as soon as both sides have been scanned. With two scans running at
+  // once (two directories dropped together) only the one that finishes last starts it.
+  function maybeAutoCompare(){
+    const sides = activeSides();
+    if(dc.comparing || sides.some(sd => dc[sd].scanning)) return;
+    if(sides.some(sd => dc[sd].name && !dc[sd].files)) return;     // a chosen directory whose scan was cancelled
+    if(!sides.some(sd => dc[sd].files)) return;                    // nothing chosen yet
+    runCompare(true);
+  }
+
+  // Re-compare must see changes made on disk since the last scan (added, modified, deleted
+  // files), so both directories are scanned again first; the comparison then starts by itself.
+  // Directories chosen through the folder-upload fallback cannot be re-read by the page.
+  async function rescanAndCompare(){
+    const named = activeSides().filter(sd => dc[sd].name && dc[sd].producer);
+    if(!named.length){ setMsg('Select a directory first.', true); return; }
+    // Scan again whatever can be re-read, plus any side whose scan was cancelled (it has no file list yet).
+    const sides = named.filter(sd => dc[sd].rescannable || !dc[sd].files);
+    const stale = named.filter(sd => dc[sd].files && !dc[sd].rescannable);
+    const note = stale.length
+      ? `${stale.map(sideLabel).join(' and ')} was selected through the folder-upload fallback, so later changes in it `
+        + 'cannot be detected. Select it again to refresh.'
+      : '';
+    dc.staleNote = note;
+    if(sides.length){
+      dc.keepStale = true;     // runScan would otherwise reset the note
+      try{ await Promise.all(sides.map(sd => runScan(sd, dc[sd].name, dc[sd].handle, dc[sd].producer, dc[sd].rescannable))); }
+      finally{ dc.keepStale = false; }
+    } else {
+      await runCompare();
+    }
+  }
+
+  // Stop scanning that is still in progress. The selected directory stays selected (name, handle),
+  // so Re-compare can scan and compare it again.
+  function cancelScans(){
+    for(const side of ['left', 'mid', 'right']){
+      const s = dc[side];
+      if(!s.scanning) continue;
+      s.scanId++;
+      Object.assign(s, { scanning: false, files: null, dirs: null, errors: [], progress: 0 });
+      updateSideUI(side);
+    }
+    updateCompareButton();
+    updateHint();
+    setMsg('');
+    setStatus('Scanning cancelled.');     // status bar only
+  }
+
+  /* ---------- Recursive scan (File System Access API) ---------- */
+  async function scanDirectory(directoryHandle, ctl){
+    const files = [];
+    const errors = [];
+    const dirs = [];     // every sub-directory; `empty` = holds no files and no sub-directories
+    const stack = [{ handle: directoryHandle, prefix: '' }];
+    let lastYield = performance.now();
+    while(stack.length){
+      const { handle, prefix } = stack.pop();
+      let count = 0;
+      try{
+        for await (const [name, child] of handle.entries()){
+          ctl.check();
+          count++;
+          const rel = prefix + name;
+          if(child.kind === 'directory'){
+            stack.push({ handle: child, prefix: rel + '/' });
+            continue;
+          }
+          try{
+            const file = await child.getFile();
+            files.push({ path: rel, name, size: file.size, file, handle: child });
+          }catch(err){
+            if(err === CANCELLED) throw err;
+            errors.push({ path: rel, message: describeError(err) });
+            files.push({ path: rel, name, size: null, file: null, error: describeError(err) });
+          }
+          if(performance.now() - lastYield > 40){
+            ctl.progress(files.length);
+            await yieldUi();
+            lastYield = performance.now();
+          }
+        }
+        if(prefix) dirs.push({ path: prefix.slice(0, -1), empty: count === 0 });
+      }catch(err){
+        if(err === CANCELLED) throw err;
+        if(prefix) dirs.push({ path: prefix.slice(0, -1), empty: false });   // unreadable: never claim "empty"
+        errors.push({ path: prefix || '/', message: describeError(err) });
+      }
+    }
+    ctl.progress(files.length);
+    return { files, errors, dirs };
+  }
+
+  // Fallback scan: the FileList already holds every file with its relative path.
+  async function scanFileList(list, ctl){
+    const files = [];
+    for(let i = 0; i < list.length; i++){
+      if((i & 1023) === 0) ctl.check();
+      const f = list[i];
+      const rp = f.webkitRelativePath || f.name;
+      const slash = rp.indexOf('/');
+      const rel = slash >= 0 ? rp.slice(slash + 1) : rp;   // drop the selected root folder's own name
+      files.push({ path: rel, name: f.name, size: f.size, file: f });
+    }
+    // Directories can only be inferred from file paths here; the browser does not report empty folders.
+    const dirSet = new Set();
+    for(const f of files){
+      const parts = f.path.split('/');
+      for(let i = 1; i < parts.length; i++) dirSet.add(parts.slice(0, i).join('/'));
+    }
+    ctl.progress(files.length);
+    return { files, errors: [], dirs: Array.from(dirSet, path => ({ path, empty: false })) };
+  }
+
+  // Map keyed by relative path (case-sensitive, '/' separated).
+  function buildFileIndex(files){
+    const index = new Map();
+    for(const f of files) index.set(f.path, f);
+    return index;
+  }
+
+  /* ---------- Comparison ---------- */
+  function buffersEqual(a, b){
+    const n = a.byteLength;
+    if(n !== b.byteLength) return false;
+    const n4 = n >>> 2;
+    const a32 = new Uint32Array(a, 0, n4), b32 = new Uint32Array(b, 0, n4);
+    for(let i = 0; i < n4; i++) if(a32[i] !== b32[i]) return false;
+    if(n4 * 4 < n){
+      const a8 = new Uint8Array(a), b8 = new Uint8Array(b);
+      for(let i = n4 * 4; i < n; i++) if(a8[i] !== b8[i]) return false;
+    }
+    return true;
+  }
+
+  // Byte-for-byte comparison in chunks, so large files never sit in memory whole.
+  async function compareFileContents(leftFile, rightFile, ctl){
+    if(leftFile.size !== rightFile.size) return false;
+    const size = leftFile.size;
+    for(let off = 0; off < size; off += CHUNK_BYTES){
+      if(ctl) ctl.check();
+      const end = Math.min(off + CHUNK_BYTES, size);
+      const [a, b] = await Promise.all([
+        leftFile.slice(off, end).arrayBuffer(),
+        rightFile.slice(off, end).arrayBuffer(),
+      ]);
+      if(!buffersEqual(a, b)) return false;
+    }
+    return true;
+  }
+
+  function comparePathParts(x, y){
+    const a = x.parts, b = y.parts;
+    const n = Math.min(a.length, b.length);
+    for(let i = 0; i < n; i++){
+      if(a[i] < b[i]) return -1;
+      if(a[i] > b[i]) return 1;
+    }
+    return a.length - b.length;
+  }
+
+  // leftFiles / rightFiles (and midFiles for 3-way): Map<relativePath, fileEntry>. Merging is O(N + M (+ K)).
+  // Status of a path: present on one side only -> that side; present everywhere with identical
+  // content -> same; anything else (content differs, or missing from one of the other sides) -> different.
+  async function compareDirectories(leftFiles, rightFiles, ctl, leftDirs, rightDirs, midFiles, midDirs, known){
+    const three = !!midFiles;
+    const need = three ? 3 : 2;
+    const keys = new Set(leftFiles.keys());
+    if(three) for(const k of midFiles.keys()) keys.add(k);
+    for(const k of rightFiles.keys()) keys.add(k);
+    const total = keys.size;
+    const out = [];
+    let done = 0;
+    let lastYield = performance.now();
+    for(const path of keys){
+      ctl.check();
+      const l = leftFiles.get(path) || null;
+      const m = three ? (midFiles.get(path) || null) : null;
+      const r = rightFiles.get(path) || null;
+      const present = [['left', l], ['mid', m], ['right', r]].filter(x => x[1]);
+      let status, error = null, eq = null;
+      if(present.length === 1) status = present[0][0];
+      else if(present.some(x => x[1].error)){ status = 'error'; error = present.find(x => x[1].error)[1].error; }
+      else if(!three){
+        if(present.some(x => x[1].size !== present[0][1].size)) status = 'different';
+        else{
+          try{
+            status = (await compareFileContents(present[0][1].file, present[1][1].file, ctl)) ? 'same' : 'different';
+          }catch(err){
+            if(err === CANCELLED) throw err;
+            status = 'error';
+            error = describeError(err);
+          }
+        }
+      } else {
+        // 3-way: compare each outer side with the middle one, so every column can be judged on its own.
+        eq = { left: null, right: null };
+        try{
+          for(const sd of ['left', 'right']){
+            const o = sd === 'left' ? l : r;
+            if(!(o && m)) continue;
+            const was = known && known.get(path);                 // earlier result of this very pair, still valid
+            eq[sd] = was && was.eq && typeof was.eq[sd] === 'boolean'
+              ? was.eq[sd]
+              : o.size === m.size && await compareFileContents(o.file, m.file, ctl);
+          }
+          status = present.length === 3 && eq.left && eq.right ? 'same' : 'different';
+        }catch(err){
+          if(err === CANCELLED) throw err;
+          status = 'error';
+          error = describeError(err);
+        }
+      }
+      out.push({ path, parts: path.split('/'), status, left: l, mid: m, right: r, error, eq });
+      done++;
+      if(performance.now() - lastYield > 50){
+        ctl.progress(done, total, path);
+        await yieldUi();
+        lastYield = performance.now();
+      }
+    }
+    // Empty directories are compared too. (A directory that has content on any side is judged through that content.)
+    const dirMaps = [['left', leftDirs], ['mid', three ? midDirs : null], ['right', rightDirs]];
+    const dirKeys = new Set();
+    for(const [, mp] of dirMaps) if(mp) for(const k of mp.keys()) dirKeys.add(k);
+    for(const path of dirKeys){
+      ctl.check();
+      const infos = dirMaps.map(([sd, mp]) => [sd, mp ? mp.get(path) : undefined]).filter(x => x[1]);
+      if(!infos.some(x => x[1].empty) || !infos.every(x => x[1].empty)) continue;
+      const entry = {
+        path, parts: path.split('/'), kind: 'dir', error: null, eq: null, left: null, mid: null, right: null,
+        status: infos.length === 1 ? infos[0][0] : infos.length === need ? 'same' : 'different',
+      };
+      for(const [sd] of infos) entry[sd] = { path, size: null };
+      out.push(entry);
+    }
+    out.sort(comparePathParts);
+    return out;
+  }
+
+  async function checkReadPermission(side){
+    const h = dc[side].handle;
+    if(!h || typeof h.queryPermission !== 'function') return true;
+    try{
+      let p = await h.queryPermission({ mode: 'read' });
+      if(p === 'prompt' && typeof h.requestPermission === 'function') p = await h.requestPermission({ mode: 'read' });
+      return p === 'granted';
+    }catch(_){ return true; }
+  }
+
+  function cancelCompare(silent){
+    dc.runId++;
+    const was = dc.comparing;
+    dc.comparing = false;
+    setProgress('');
+    updateCompareButton();
+    if(was && !silent){ setMsg(''); setStatus('Comparison cancelled.'); }   // status bar only
+  }
+
+  async function runCompare(keepMsg){
+    if(dc.comparing){ cancelCompare(); return; }
+    const sides = activeSides();
+    if(sides.some(sd => dc[sd].name && !dc[sd].files) || !sides.some(sd => dc[sd].files)){
+      setMsg('Select a directory first.', true);
+      return;
+    }
+    if(sides.some(sd => dc[sd].scanning)){ setMsg('Wait until scanning has finished.'); return; }
+    for(const side of sides.filter(sd => dc[sd].files)){
+      if(!await checkReadPermission(side)){
+        setMsg(`${sideLabel(side)}: permission to read "${dc[side].name}" is no longer available. Select the directory again.`, true);
+        return;
+      }
+    }
+    const id = ++dc.runId;
+    dc.comparing = true;
+    if(!dc.keepView) clearResults();
+    if(!keepMsg) setMsg('');      // an automatic run keeps the scan warnings already shown
+    updateCompareButton();
+    setProgress('Comparing...');
+    const ctl = {
+      check(){ if(dc.runId !== id) throw CANCELLED; },
+      progress(done, total, path){ setProgress(`Comparing ${done.toLocaleString()} / ${total.toLocaleString()} files - ${path}`); },
+    };
+    try{
+      const three = dc.mode === '3way';
+      // Columns without a directory take part as empty ones, so a single directory is listed at once.
+      const E = () => new Map();
+      const results = await compareDirectories(dc.left.files || E(), dc.right.files || E(), ctl, dc.left.dirs || E(), dc.right.dirs || E(),
+        three ? (dc.mid.files || E()) : null, three ? (dc.mid.dirs || E()) : null);
+      ctl.check();
+      renderDirectoryCompareResults(results, dc.keepView);     // after a one-column refresh the view stays as it was
+      dc.keepView = false;
+      const errs = results.filter(r => r.status === 'error').length;
+      setProgress('');
+      // Completion result goes to the status bar (right side) only, not the in-view message line.
+      const emptyDirs = results.filter(r => r.kind === 'dir').length;
+      const fileCount = results.length - emptyDirs;
+      setStatus(`Compared ${fileCount.toLocaleString()} files`
+        + (emptyDirs ? ` and ${emptyDirs.toLocaleString()} empty directories` : '')
+        + (errs ? `; ${errs} could not be read.` : '.')
+        + (dc.staleNote ? ' ' + dc.staleNote : ''), errs > 0);
+      dc.staleNote = '';
+    }catch(err){
+      if(err === CANCELLED) return;
+      setProgress('');
+      setMsg(`Comparison failed - ${describeError(err)}.`, true);
+    }finally{
+      if(dc.runId === id){
+        dc.comparing = false;
+        dc.keepView = false;
+        updateCompareButton();
+        updateHint();
+      }
+    }
+  }
+
+  /* ---------- Rendering ---------- */
+  function updateSideUI(side){
+    const s = dc[side];
+    let info = '';
+    if(s.scanning) info = `Scanning... ${s.progress.toLocaleString()} files found`;
+    else if(s.files) info = s.files.size === 0 ? (s.dirs && s.dirs.size ? 'No files' : 'Empty - no files') : `${s.files.size.toLocaleString()} files`
+      + (s.errors.length ? `, ${s.errors.length} unreadable` : '');
+    // Read-only path field: directory name, plus scan/file-count info when available.
+    const nameEl = $('dv-name-' + side);
+    nameEl.value = s.name || '';                      // the field shows the directory name only; the tooltip adds the details
+    nameEl.title = s.name ? (info ? `${s.name}\n${info}` : s.name) : '';
+    updateColumnState();
+  }
+
+  // Shows what each column is doing right now, centred in its own content area.
+  function updateColumnState(){
+    for(const sd of ['left', 'mid', 'right']){
+      const el = $('dv-state-' + sd);
+      if(!el) continue;
+      const s = dc[sd];
+      let t = '';
+      if(s.name){
+        if(s.scanning) t = `Scanning... ${s.progress.toLocaleString()} files found`;
+        else if(dc.comparing) t = 'Comparing...';
+        else if(!s.files) t = 'Scanning cancelled';
+        else if(!(dc.results && dc.visible && dc.visible.length)) t = s.files.size === 0 && !(s.dirs && s.dirs.size) ? 'Empty - no files' : `${s.files.size.toLocaleString()} files`;
+      }
+      if(el.textContent !== t) el.textContent = t;
+    }
+  }
+
+  const ICON_RECOMPARE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.9-3.5M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.9 3.5M20 20v-4h-4"/></svg>';
+  const ICON_CANCEL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>';
+
+  // Swap buttons: enabled once one of the two directories they swap is chosen, and not while either is being scanned.
+  // Refresh buttons (one per column): enabled once that column has a directory, not while it is being scanned.
+  function updateRefreshButtons(){
+    for(const sd of ['left', 'mid', 'right']) $('dv-refresh-' + sd).disabled = !dc[sd].name || dc[sd].scanning;
+  }
+
+  // Re-read only this column's directory from disk; the other columns keep their scan. When the scan
+  // finishes the comparison starts again by itself (every selected directory is ready).
+  // Shows the current result without the column that is being re-read (it counts as empty meanwhile).
+  // Contents of file pairs that do not involve that column are not read again: their previous result is reused.
+  async function previewWithout(side, prev){
+    const id = ++dc.runId;
+    const ctl = { check(){ if(dc.runId !== id) throw CANCELLED; }, progress(){} };
+    try{
+      const three = dc.mode === '3way';
+      const files = sd => sd === side ? new Map() : (dc[sd].files || new Map());
+      const dirs = sd => sd === side ? new Map() : (dc[sd].dirs || new Map());
+      const known = new Map(prev.filter(r => r.kind !== 'dir').map(r => [r.path, r]));
+      const results = await compareDirectories(files('left'), files('right'), ctl, dirs('left'), dirs('right'),
+        three ? files('mid') : null, three ? dirs('mid') : null, known);
+      ctl.check();
+      renderDirectoryCompareResults(results, true);
+    }catch(err){
+      if(err !== CANCELLED) console.error(err);
+    }
+  }
+
+  function refreshSide(side){
+    const s = dc[side];
+    if(!s.name || !s.producer || s.scanning) return;
+    if(!s.rescannable){
+      setMsg(`${sideLabel(side)} was selected through the folder-upload fallback, so the page cannot re-read it. Select it again to refresh.`, true);
+      return;
+    }
+    runScan(side, s.name, s.handle, s.producer, true, true);
+  }
+
+  function updateSwapButtons(){
+    for(const b of document.querySelectorAll('.dv-swap-btn')){
+      const a = b.dataset.swapA, c = b.dataset.swapB;
+      b.disabled = !(dc[a].name || dc[c].name) || dc[a].scanning || dc[c].scanning;
+    }
+  }
+
+  // Exchange two selected directories (name, handle, scan data ...) and compare again with the new arrangement.
+  function swapDirs(a, c){
+    if(dc[a].scanning || dc[c].scanning) return;
+    [dc[a], dc[c]] = [dc[c], dc[a]];
+    cancelCompare(true);
+    clearResults();
+    updateSideUI(a); updateSideUI(c);
+    updateCompareButton();
+    updateHint();
+    setStatus(`Swapped ${sideLabel(a)} \u2194 ${sideLabel(c)}`);
+    maybeAutoCompare();
+  }
+
+  function updateCompareButton(){
+    const btn = $('dv-compare');
+    // The same button stops scanning or comparing at any time, and re-runs the comparison otherwise.
+    updateSwapButtons();
+    updateRefreshButtons();
+    updateColumnState();
+    const busy = dc.comparing || ['left', 'mid', 'right'].some(sd => dc[sd].scanning);
+    const label = busy ? 'Cancel' : 'Re-compare';
+    btn.innerHTML = busy ? ICON_CANCEL : ICON_RECOMPARE;
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+    if(busy){ btn.disabled = false; return; }
+    btn.disabled = !activeSides().some(sd => dc[sd].name);    // at least one directory chosen (scan finished or cancelled)
+  }
+
+  function updateHint(){
+    updateColumnState();
+    const el = $('dv-empty');
+    const sides = activeSides();
+    // The separator column(s) are drawn from top to bottom whatever the number of rows. The columns' hints show
+    // only while there is nothing to list, and a column's hint goes away once it has a directory.
+    const hasRows = !!(dc.results && dc.visible.length);
+    for(const sd of ['left', 'mid', 'right']) $('dv-hint-' + sd).classList.toggle('off', hasRows || !!dc[sd].name);      // visibility only: keeps the grid columns in place
+    if(dc.results && dc.visible.length){ el.textContent = ''; return; }
+    const chosen = sides.filter(sd => dc[sd].name);
+    let t = '';
+    if(dc.results){ t = chosen.length > 1 ? (chosen.length === 3 ? 'All three directories are empty, so there is nothing to compare.' : 'Both directories are empty, so there is nothing to compare.') : 'The selected directory is empty, so there is nothing to list.'; }
+    else if(dc.comparing){ t = 'Comparing...'; }
+    else if(sides.some(sd => dc[sd].scanning)){ t = 'Scanning directories...'; }
+    else if(!chosen.length){ t = ''; }                                // the columns' own hints say what to do
+    else if(chosen.some(sd => !dc[sd].files)){ t = 'Scanning was cancelled. Click Re-compare to scan and compare the selected directories.'; }
+    else{
+      t = 'Ready: ' + chosen.map(sd => `${dc[sd].files.size.toLocaleString()} files on the ${sd}`).join(', ') + '. Click Re-compare.';
+    }
+    el.textContent = t;
+  }
+
+  function clearResults(){
+    dc.results = null;
+    dc.keepView = false;
+    dc.tree = null;
+    dc.visible = [];
+    dc.diffNodes = [];
+    dc.nodeByKey = null;
+    for(const id of ['dv-gutter-l-track', 'dv-gutter-r-track']) $(id).innerHTML = '';
+    gutterKey = '';
+    dc.selectedKey = null;
+    $('dv-rows').style.height = '0px';
+    $('dv-rows').innerHTML = '';
+    vFirst = vLast = -1;
+    syncScrollbarWidth();
+    updateNavButtons();
+    updateHint();
+  }
+
+  /* ---------- Merged folder tree ----------
+     Both sides are merged into one tree keyed by path segment, so a row in the
+     left pane and the row beside it in the right pane always describe the same
+     relative path. Each pane only draws the entries that exist on its own side;
+     the other side shows a hatched placeholder. Folders are listed first, then
+     files, both in plain code-unit order (same case-sensitive rule as paths). */
+  function buildTree(results, leftDirs, rightDirs, midDirs){
+    const root = { kind: 'dir', depth: -1, children: new Map() };
+    // Directory nodes know whether the directory itself exists on each side (selfL/selfR),
+    // which is what makes empty directories show up.
+    const dirNode = (cur, parts, i) => {
+      const key = 'd:' + parts[i];
+      let next = cur.children.get(key);
+      if(!next){
+        const path = parts.slice(0, i + 1).join('/');
+        next = { kind: 'dir', name: parts[i], path, depth: i, children: new Map(), expanded: false,
+                 selfL: !!(leftDirs && leftDirs.has(path)), selfM: !!(midDirs && midDirs.has(path)),
+                 selfR: !!(rightDirs && rightDirs.has(path)) };
+        cur.children.set(key, next);
+      }
+      return next;
+    };
+    for(const r of results){
+      let cur = root;
+      const parts = r.parts;
+      const dirDepth = r.kind === 'dir' ? parts.length : parts.length - 1;   // empty directories are nodes themselves
+      for(let i = 0; i < dirDepth; i++) cur = dirNode(cur, parts, i);
+      if(r.kind === 'dir'){ cur.entry = r; continue; }      // an empty directory keeps its own comparison entry
+      const name = parts[parts.length - 1];
+      cur.children.set('f:' + name, {
+        kind: 'file', name, path: r.path, depth: parts.length - 1, result: r,
+        status: r.status, hasL: !!r.left, hasM: !!r.mid, hasR: !!r.right,
+      });
+    }
+    finalizeNode(root);
+    return root;
+  }
+
+  // How an outer side relates to the middle for one entry: 'same' | 'diff' | 'none' (absent from both).
+  function relOf(entry, side){
+    if(entry.status === 'error') return 'diff';
+    const o = entry[side], m = entry.mid;
+    if(!o && !m) return 'none';
+    if(!o || !m) return 'diff';
+    if(entry.kind === 'dir') return 'same';
+    return entry.eq && entry.eq[side] ? 'same' : 'diff';
+  }
+
+  function finalizeNode(node){
+    node.list = Array.from(node.children.values()).sort((a, b) => {
+      if(a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1;
+      return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+    });
+    const KEYS = ['L', 'M', 'R'];
+    node.diff = 0;
+    node.dL = node.dR = 0;       // entries below that differ from the middle column (left / right side)
+    if(node.entry){ node.dL += relOf(node.entry, 'left') === 'diff' ? 1 : 0; node.dR += relOf(node.entry, 'right') === 'diff' ? 1 : 0; }
+    for(const k of KEYS){ node['has' + k] = !!node['self' + k]; node['count' + k] = 0; }
+    for(const c of node.list){
+      if(c.kind === 'dir'){
+        finalizeNode(c);
+        for(const k of KEYS) node['count' + k] += c['count' + k];
+        node.diff += c.diff;
+        node.dL += c.dL; node.dR += c.dR;
+        if(c.status !== 'same') node.diff++;       // a one-sided (e.g. empty) folder is a difference too
+      } else {
+        for(const k of KEYS) if(c['has' + k]) node['count' + k]++;
+        if(c.status !== 'same') node.diff++;
+        if(relOf(c.result, 'left') === 'diff') node.dL++;
+        if(relOf(c.result, 'right') === 'diff') node.dR++;
+      }
+      for(const k of KEYS) node['has' + k] = node['has' + k] || c['has' + k];
+    }
+    // Per-side "has an earlier / later sibling on this side" flags drive the dotted guide lines.
+    for(const k of KEYS){
+      let pre = false;
+      for(const c of node.list){ c['earlier' + k] = pre; pre = pre || c['has' + k]; }
+      let post = false;
+      for(let i = node.list.length - 1; i >= 0; i--){
+        const c = node.list[i];
+        c['later' + k] = post; post = post || c['has' + k];
+      }
+    }
+    for(const c of node.list) c.parent = node;
+    if(node.depth >= 0){
+      const present = KEYS.filter(k => node['has' + k]);
+      node.status = present.length === 1 ? KS[present[0]] : node.diff > 0 ? 'different' : 'same';
+      // Open only folders that exist on several sides and contain differences;
+      // one-sided folders stay collapsed until the user opens them.
+      node.expanded = node.status === 'different';
+    }
+  }
+
+  function rebuildVisible(){
+    const out = [];
+    (function walk(n){
+      for(const c of n.list){
+        out.push(c);
+        if(c.kind === 'dir' && c.expanded) walk(c);
+      }
+    })(dc.tree);
+    dc.visible = out;
+    dc.visVersion = (dc.visVersion || 0) + 1;
+    $('dv-rows').style.height = (out.length * ROW_H) + 'px';
+    vFirst = vLast = -1;
+  }
+
+  function toggleDir(node, expand){
+    node.expanded = expand;
+    rebuildVisible();
+    paintRows(true);
+    requestAnimationFrame(syncScrollbarWidth);      // scrollbar may have appeared / disappeared
+  }
+
+  function renderDirectoryCompareResults(results, keepView){
+    // Keep which folders are open and where the list is scrolled when the same view is only being refreshed.
+    const open = new Map();
+    const scroll = $('dv-list').scrollTop;
+    if(keepView && dc.tree) (function walk(n){ for(const c of n.list) if(c.kind === 'dir'){ open.set(c.path, c.expanded); walk(c); } })(dc.tree);
+    dc.results = results;
+    dc.tree = buildTree(results, dc.left.dirs, dc.right.dirs, dc.mid.dirs);
+    if(keepView) (function walk(n){ for(const c of n.list) if(c.kind === 'dir'){ if(open.has(c.path)) c.expanded = open.get(c.path); walk(c); } })(dc.tree);
+    indexTree();
+    rebuildVisible();
+    $('dv-list').scrollTop = keepView ? scroll : 0;
+    if(!keepView) dc.keepView = false;
+    paintRows(true);
+    updateNavButtons();
+    requestAnimationFrame(syncScrollbarWidth);
+    updateHint();
+  }
+
+  const ICON_DIR = '<svg class="dv-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h8a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></svg>';
+  const ICON_FILE = '<svg class="dv-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5"/></svg>';
+
+  const INDENT = 22;                              // px per tree level
+  const chevCentre = d => 8 + d * INDENT + 9;     // x of the chevron centre at depth d (= parent icon centre)
+
+  // Dotted guide lines for one side. Column j (x = chevCentre(j)) is the line that links
+  // the children of the depth j-1 ancestor; it continues through this row while that
+  // ancestor still has later siblings on the same side.
+  function guideHtml(node, side){
+    const k = SK[side];
+    const has = n => n['has' + k];
+    const later = n => n['later' + k];
+    const earlier = n => n['earlier' + k];
+    const d = node.depth;
+    const vl = (x, pos) => `<i class="dv-vl" style="left:${x}px;${pos}"></i>`;
+    const chain = [];
+    for(let a = node; a && a.depth >= 0; a = a.parent) chain[a.depth] = a;
+    const topRoot = { hasL: true, hasM: true, hasR: true };      // stands in for the (invisible) root of the tree
+    let out = '';
+    for(let j = 0; j <= d; j++){
+      const a = chain[j];
+      const par = j === 0 ? topRoot : chain[j - 1];
+      if(!par || !has(par)) continue;
+      const x = chevCentre(j);
+      // Outermost level: the line starts at the first entry, not above it.
+      const fromTop = j !== 0 || earlier(a);
+      if(j < d){
+        if(later(a)) out += vl(x, 'top:0;bottom:0');
+      } else if(has(node)){
+        const isDir = node.kind === 'dir' && node.list.length > 0;   // empty folders have no chevron, so no gap
+        // Folders leave a gap around the chevron glyph that sits on the line.
+        if(isDir){
+          if(fromTop) out += vl(x, 'top:0;height:calc(50% - 8px)');
+          if(later(node)) out += vl(x, 'top:calc(50% + 8px);bottom:0');
+        } else if(fromTop){
+          out += vl(x, later(node) ? 'top:0;bottom:0' : 'top:0;height:50%');
+        } else if(later(node)){
+          out += vl(x, 'top:50%;bottom:0');
+        }
+        out += isDir
+          ? `<i class="dv-hl" style="left:${x + 9}px;width:6px"></i>`
+          : `<i class="dv-hl" style="left:${x}px;width:15px"></i>`;
+      } else if(later(node) && fromTop){
+        out += vl(x, 'top:0;bottom:0');
+      }
+    }
+    // Expanded folder: line running down from its icon to its first child.
+    if(node.kind === 'dir' && node.expanded && has(node) && node.list.some(c => has(c))){
+      out += vl(chevCentre(d + 1), 'top:calc(50% + 8px);bottom:0');
+    }
+    return out;
+  }
+
+  // Colour of one cell, judged like Text Compare: a base column against the modified column(s).
+  //   2-way: Left = base, Right = modified.   3-way: Middle = base, Left and Right = modified.
+  //   'diff' modified (yellow) | 'add' exists only on a modified side (green) | 'del' removed from a modified side (blue)
+  //   'hatch-add' / 'hatch-del' / 'hatch': no file here (hatched), tinted like the change it stands for.
+  function cellKind(node, side){
+    const three = dc.mode === '3way';
+    const base = three ? 'mid' : 'left';
+    const mods = three ? ['left', 'right'] : ['right'];
+    const has = sd => !!node['has' + SK[sd]];
+    if(has(side) && node.kind === 'file' && node.status === 'error') return 'err';
+    // Does a modified side differ from the base (both present)?
+    const differs = sd => node.kind === 'dir'
+      ? (three ? (sd === 'left' ? node.dL : node.dR) > 0 : node.diff > 0)
+      : (three ? !(node.result.eq && node.result.eq[sd]) : node.result.status !== 'same');
+    if(side !== base){
+      if(has(side)) return has(base) ? (differs(side) ? 'diff' : null) : 'add';
+      return has(base) ? 'hatch-del' : 'hatch';
+    }
+    if(!has(base)) return 'hatch-add';
+    const outers = mods.filter(has);
+    if(!outers.length) return 'del';                       // only the base has it: removed everywhere
+    if(outers.some(differs)) return 'diff';
+    if(mods.some(sd => !has(sd))) return 'del';            // removed from at least one modified side
+    return null;
+  }
+  // 3-way, middle column: it is the base for both outer columns, so its colour is judged against the left
+  // column on its left half and against the right column on its right half, blending in between
+  // (e.g. blue "deleted vs. left" fading into yellow "modified vs. right").
+  function midBackground(node){
+    const rel = sd => {
+      if(!node['has' + SK[sd]]) return 'del';                   // the outer column lacks it: deleted there
+      const differs = node.kind === 'dir'
+        ? (sd === 'left' ? node.dL : node.dR) > 0
+        : !(node.result.eq && node.result.eq[sd]);
+      return differs ? 'diff' : null;
+    };
+    const col = k => k === 'diff' ? 'var(--diff-mod-line)' : k === 'del' ? 'var(--diff-del-line)' : 'transparent';
+    const l = rel('left'), r = rel('right');
+    if(l === r) return l ? col(l) : null;                       // same colour on both sides: solid
+    return `linear-gradient(to right, ${col(l)}, ${col(r)})`;
+  }
+  // 3-way, middle column without the file: it is the base for both outer columns, so the hatching is tinted
+  // against the left column on its left half and the right column on its right half (green where that
+  // column has the file = added, plain where it has none either). Stripes are painted with the panel colour
+  // over a left-to-right colour gradient, which is how the gradient survives the hatching.
+  function midHatchBackground(node){
+    const col = sd => node['has' + SK[sd]] ? 'rgba(76,175,80,0.34)' : 'var(--empty-stripe)';
+    return 'repeating-linear-gradient(45deg, transparent 0, transparent 4px, var(--panel) 4px, var(--panel) 8px), '
+      + `linear-gradient(to right, ${col('left')}, ${col('right')})`;
+  }
+  const CELL_CLS = { diff: ' c-diff', add: ' c-add', del: ' c-del', err: ' c-err' };
+  const HATCH_CLS = { 'hatch-add': ' none-add', 'hatch-del': ' none-del' };
+
+  function cellHtml(node, side){
+    const has = node['has' + SK[side]];
+    const guides = guideHtml(node, side);
+    if(!has){
+      if(dc.mode === '3way' && side === 'mid') return `<div class="dv-cell none" style="background:${midHatchBackground(node)}">${guides}</div>`;
+      return `<div class="dv-cell none${HATCH_CLS[cellKind(node, side)] || ''}">${guides}</div>`;
+    }
+    const pad = 8 + node.depth * INDENT;
+    let inner;
+    if(node.kind === 'dir'){
+      const n = node['count' + SK[side]];
+      inner = `<span class="dv-chev" aria-hidden="true">${node.list.length ? (node.expanded ? '\u25BE' : '\u25B8') : ''}</span>${ICON_DIR}`
+        + `<span class="dv-path">${esc(node.name)}</span><span class="dv-size">${n.toLocaleString()} file${n === 1 ? '' : 's'}</span>`;
+    } else {
+      const e = node.result[side];
+      inner = `<span class="dv-chev"></span>${ICON_FILE}`
+        + `<span class="dv-path">${esc(node.name)}</span><span class="dv-size">${formatSize(e ? e.size : null)}</span>`;
+    }
+    let tint = CELL_CLS[cellKind(node, side)] || '';
+    let bg = '';
+    if(dc.mode === '3way' && side === 'mid' && tint !== ' c-err'){
+      tint = '';
+      const g = midBackground(node);
+      if(g) bg = `background:${g};`;
+    }
+    const tip = `${dc[side].name}/${node.path}`;       // full path: selected directory + relative path
+    return `<div class="dv-cell${tint}" style="${bg}padding-left:${pad}px" title="${esc(tip)}">${guides}${inner}</div>`;
+  }
+
+  // Virtualised list: only the rows near the viewport are in the DOM, so
+  // large trees stay responsive.
+  let vFirst = -1, vLast = -1;
+  // The list has a vertical scrollbar the path row above does not; pad the path row by
+  // the same amount so both are centred identically and their divider lines align.
+  /* ---------- Overview gutters (left and right edge), like Text Compare's ----------
+     Each gutter squeezes the whole list into its height and marks where things differ, using the same
+     colours: yellow = modified, green = added, blue = deleted. A viewport box shows what the list is
+     currently scrolling over; clicking a marker selects that row, clicking elsewhere scrolls there.
+     2-way: both gutters show Right relative to Left (the base). 3-way: the left gutter shows Left
+     relative to Middle, the right gutter shows Right relative to Middle. An expanded folder is skipped
+     (its rows carry the markers); a collapsed folder stands for everything inside it. */
+  let gutterKey = '';
+  function gutterType(node, which){
+    if(node.kind === 'dir' && node.list.length && node.expanded) return null;
+    const three = dc.mode === '3way';
+    const a = three ? (which === 'left' ? 'L' : 'R') : 'R';      // modified side
+    const b = three ? 'M' : 'L';                                 // base side
+    const hasA = !!node['has' + a], hasB = !!node['has' + b];
+    if(hasA && hasB){
+      const differs = node.kind === 'dir'
+        ? (three ? (a === 'L' ? node.dL : node.dR) : node.diff) > 0
+        : (three ? !(node.result.eq && node.result.eq[KS[a]]) : node.result.status !== 'same');
+      return differs ? 'mod' : null;
+    }
+    if(hasA) return 'add';
+    if(hasB) return 'del';
+    return null;
+  }
+  function renderDirGutters(force){
+    if(dc.view !== 'dir' || !dc.results) return;
+    const n = dc.visible.length;
+    const H = $('dv-gutter-l').offsetHeight;
+    const key = `${dc.visVersion}|${dc.mode}|${H}|${n}`;
+    if(!force && key === gutterKey){ updateDirGutterViewport(); return; }
+    gutterKey = key;
+    for(const [which, trackId] of [['left', 'dv-gutter-l-track'], ['right', 'dv-gutter-r-track']]){
+      let html = '', runType = null, runStart = 0;
+      const flush = end => {
+        if(!runType) return;
+        const top = runStart / n * H, h = Math.max(2, (end - runStart) / n * H);
+        html += `<div class="marker ${runType}" style="top:${top.toFixed(1)}px;height:${h.toFixed(1)}px" data-row="${runStart}" title="Jump to this diff"></div>`;
+      };
+      if(n && H){
+        for(let i = 0; i < n; i++){
+          const t = gutterType(dc.visible[i], which);
+          if(t !== runType){ flush(i); runType = t; runStart = i; }
+        }
+        flush(n);
+      }
+      $(trackId).innerHTML = html + `<div class="viewport-indicator" id="${trackId}-vp"></div>`;
+    }
+    updateDirGutterViewport();
+  }
+  function updateDirGutterViewport(){
+    const list = $('dv-list');
+    const totalH = Math.max(dc.visible.length * ROW_H, 1);
+    for(const [gid, trackId] of [['dv-gutter-l', 'dv-gutter-l-track'], ['dv-gutter-r', 'dv-gutter-r-track']]){
+      const vp = $(trackId + '-vp');
+      if(!vp) continue;
+      const H = $(gid).offsetHeight || 0;
+      const top = list.scrollTop / totalH * H;
+      const height = Math.min(Math.max(4, list.clientHeight / totalH * H), H);
+      vp.style.top = top.toFixed(1) + 'px';
+      vp.style.height = height.toFixed(1) + 'px';
+    }
+  }
+  for(const gid of ['dv-gutter-l', 'dv-gutter-r']){
+    $(gid).addEventListener('click', (e) => {
+      const n = dc.visible.length;
+      if(!dc.results || !n) return;
+      const marker = e.target.closest ? e.target.closest('.marker') : null;
+      if(marker){ selectIndex(Number(marker.dataset.row)); $('dv-list').focus({ preventScroll: true }); return; }
+      const g = $(gid), list = $('dv-list');
+      const ratio = Math.max(0, Math.min(1, (e.clientY - g.getBoundingClientRect().top) / Math.max(1, g.offsetHeight)));
+      list.scrollTop = ratio * n * ROW_H - list.clientHeight / 2;            // centre the clicked position
+    });
+  }
+
+  /* ---------- Resizable columns (drag the handle on a separator, like Text Compare) ---------- */
+  const DV_SEP = 64, DV_MIN_W = 80;                   // separator width, minimum column width (px)
+  function dvWidths(){                                // current pixel width of every column
+    const n = dc.mode === '3way' ? 3 : 2;
+    const total = $('dv-rows').offsetWidth || $('dv-list').clientWidth;
+    const free = Math.max(0, total - DV_SEP * (n - 1));
+    const f = dc.fr.slice(0, n);
+    const sum = f.reduce((a, b) => a + b, 0) || 1;
+    return f.map(v => free * v / sum);
+  }
+  function positionDirHandles(){
+    const ws = dvWidths(), sl = $('dv-list').scrollLeft;
+    $('dv-handle-1').style.left = (ws[0] + DV_SEP / 2 - 3.5 - sl) + 'px';
+    if(ws.length === 3) $('dv-handle-2').style.left = (ws[0] + DV_SEP + ws[1] + DV_SEP / 2 - 3.5 - sl) + 'px';
+  }
+  // Publishes the weights as CSS variables: the list rows use them as grid tracks and the path row as
+  // flex-grow, so both lay out identically and the separators stay aligned.
+  function applyDirWidths(){
+    const n = dc.mode === '3way' ? 3 : 2;
+    const f = dc.fr.slice(0, n);
+    const root = $('dir-view');
+    root.style.setProperty('--dv-wl', f[0]);
+    root.style.setProperty('--dv-wr', f[n - 1]);
+    if(n === 3) root.style.setProperty('--dv-wm', f[1]);
+    const t = f.map(v => `minmax(0,${v}fr)`);
+    root.style.setProperty('--dv-grid', n === 3 ? `${t[0]} ${DV_SEP}px ${t[1]} ${DV_SEP}px ${t[2]}` : `${t[0]} ${DV_SEP}px ${t[1]}`);
+    positionDirHandles();
+  }
+  function resetDirWidths(){ dc.fr = [1, 1, 1]; applyDirWidths(); }
+  function setupDirHandle(el, a){                     // a = index of the column to the left of this handle
+    el.addEventListener('mousedown', (e) => {
+      if(e.button !== 0) return;
+      e.preventDefault();
+      const ws = dvWidths();
+      ws.forEach((w, i) => { dc.fr[i] = w; });        // put every column on the same pixel scale before changing two of them
+      const b = a + 1, startX = e.clientX, startA = ws[a], total = ws[a] + ws[b];
+      el.classList.add('dragging');
+      document.body.classList.add('resizing-panes');
+      const onMove = (ev) => {
+        const newA = Math.min(Math.max(startA + ev.clientX - startX, DV_MIN_W), Math.max(DV_MIN_W, total - DV_MIN_W));
+        dc.fr[a] = newA;
+        dc.fr[b] = total - newA;
+        applyDirWidths();
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        el.classList.remove('dragging');
+        document.body.classList.remove('resizing-panes');
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
+  setupDirHandle($('dv-handle-1'), 0);
+  setupDirHandle($('dv-handle-2'), 1);
+
+  let lastSbw = null;
+  function syncScrollbarWidth(){
+    const l = $('dv-list');
+    const sbw = Math.max(0, l.offsetWidth - l.clientWidth) + 'px';
+    if(sbw === lastSbw){ positionDirHandles(); return; }
+    lastSbw = sbw;
+    positionDirHandles();
+    $('dv-pathbar').style.paddingRight = `calc(30px + ${sbw})`;      // gutter + scrollbar, so the dividers line up
+    $('dv-listwrap').style.setProperty('--dv-sbw', sbw);
+  }
+  // The scrollbar can appear or disappear for reasons other than a repaint (expanding / collapsing, the
+  // window or the status bar changing size, ...). Watch the list itself so the path row always follows it.
+  if(typeof ResizeObserver === 'function'){
+    const ro = new ResizeObserver(() => { syncScrollbarWidth(); renderDirGutters(false); positionDirHandles(); });
+    ro.observe($('dv-list'));
+    ro.observe($('dv-rows'));
+  }
+  /* ---------- Copy / delete arrows between two neighbouring columns (like Text Compare's merge buttons) ----------
+     A row gets the arrows when it differs between the two columns next to the separator: added, modified or
+     deleted (a folder counts when anything inside it differs). "->" makes the right column match the left one
+     for that entry, "<-" the other way round: copy / overwrite when the source has it, delete when it does not. */
+  function pairDiffers(node, a, b){
+    const ha = !!node['has' + SK[a]], hb = !!node['has' + SK[b]];
+    if(ha !== hb) return true;
+    if(!ha) return false;
+    const three = dc.mode === '3way';
+    const outer = a === 'mid' ? b : a;                       // 3-way: the pair is always (outer, mid)
+    if(node.kind === 'dir') return three ? (outer === 'left' ? node.dL : node.dR) > 0 : node.diff > 0;
+    if(node.status === 'error') return false;
+    return three ? !(node.result.eq && node.result.eq[outer]) : node.result.status !== 'same';
+  }
+  const ICON_ARROW_L = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="20" y1="12" x2="4" y2="12"/><polyline points="10 6 4 12 10 18"/></svg>';
+  const ICON_ARROW_R = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="12" x2="20" y2="12"/><polyline points="14 6 20 12 14 18"/></svg>';
+  function sepHtml(node, a, b){
+    if(!pairDiffers(node, a, b)) return '<div class="dv-mid"></div>';
+    const has = sd => !!node['has' + SK[sd]];
+    const btn = (src, dst, cls, icon) => {
+      const what = node.kind === 'dir' ? 'folder' : 'file';
+      const title = has(src) ? `Copy ${what} to ${sideLabel(dst)}` : `Delete ${what} from ${sideLabel(dst)} (not in ${sideLabel(src)})`;
+      return `<button type="button" class="dv-act ${cls}" data-src="${src}" data-dst="${dst}" title="${esc(title)}" aria-label="${esc(title)}">${icon}</button>`;
+    };
+    return '<div class="dv-mid">' + btn(a, b, 'to-right', ICON_ARROW_R) + btn(b, a, 'to-left', ICON_ARROW_L) + '</div>';
+  }
+
+  async function dirAt(root, parts, create){
+    let h = root;
+    for(const p of parts) h = await h.getDirectoryHandle(p, { create });
+    return h;
+  }
+  // Works out what making `dst` match `src` means for one row (and everything inside a folder).
+  function planSync(node, src, dst){
+    const ops = [];
+    const has = (n, sd) => !!n['has' + SK[sd]];
+    const walk = n => {
+      if(n.kind === 'file'){
+        const s = has(n, src), d = has(n, dst);
+        if(s && !d) ops.push({ type: 'copy', node: n, add: true });
+        else if(!s && d) ops.push({ type: 'delete', node: n });
+        else if(s && d && fileDiffers(n, src, dst)) ops.push({ type: 'copy', node: n, add: false });
+        return;
+      }
+      const s = has(n, src), d = has(n, dst);
+      if(!s && d){ ops.push({ type: 'rmdir', node: n }); return; }          // the whole folder goes
+      if(s && !d && !n.list.length) ops.push({ type: 'mkdir', node: n });
+      for(const c of n.list) walk(c);
+    };
+    walk(node);
+    return ops;
+  }
+  // Content of a file that exists in both columns: do the two differ?
+  function fileDiffers(n, a, b){
+    if(n.status === 'error') return false;
+    if(dc.mode !== '3way') return n.result.status !== 'same';
+    const outer = a === 'mid' ? b : a;
+    return !(n.result.eq && n.result.eq[outer]);
+  }
+  async function applyOp(op, src, dst){
+    const root = dc[dst].handle, parts = op.node.path.split('/');
+    if(op.type === 'copy'){
+      const e = op.node.result[src];
+      const blob = e.handle ? await e.handle.getFile() : e.file;
+      const dir = await dirAt(root, parts.slice(0, -1), true);
+      const fh = await dir.getFileHandle(parts[parts.length - 1], { create: true });
+      const w = await fh.createWritable();
+      try{ await w.write(blob); await w.close(); }
+      catch(err){ try{ await w.abort(); }catch(_){} throw err; }
+    } else if(op.type === 'mkdir'){
+      await dirAt(root, parts, true);
+    } else {                                                   // 'delete' | 'rmdir'
+      let parent;
+      try{ parent = await dirAt(root, parts.slice(0, -1), false); }
+      catch(err){ if(err && err.name === 'NotFoundError') return; throw err; }
+      try{ await parent.removeEntry(parts[parts.length - 1], { recursive: op.type === 'rmdir' }); }
+      catch(err){ if(!(err && err.name === 'NotFoundError')) throw err; }
+    }
+  }
+  async function syncRow(node, src, dst){
+    if(dc.comparing || ['left', 'mid', 'right'].some(sd => dc[sd].scanning)){ setMsg('Wait until scanning and comparing have finished.'); return; }
+    const h = dc[dst].handle;
+    if(!h || typeof h.getFileHandle !== 'function'){
+      setMsg(`${sideLabel(dst)} was selected through the folder-upload fallback, so the page cannot write to it. Select it again with the directory picker.`, true);
+      return;
+    }
+    if(await ensurePermission(h, 'readwrite') === 'denied'){
+      setMsg(`${sideLabel(dst)}: permission to modify "${dc[dst].name}" was denied.`, true);
+      return;
+    }
+    const ops = planSync(node, src, dst);
+    if(!ops.length){ setMsg('Nothing to change.'); return; }
+    const nCopy = ops.filter(o => o.type === 'copy').length;
+    const nNew = ops.filter(o => o.type === 'mkdir').length;
+    const nDel = ops.filter(o => o.type === 'delete' || o.type === 'rmdir').length;
+    const overwrites = ops.filter(o => o.type === 'copy' && !o.add).length;
+    // Deleting, or acting on a whole folder, is confirmed first; a single file copy / overwrite is not.
+    if(nDel || node.kind === 'dir'){
+      const parts = [];
+      if(nCopy) parts.push(`copy ${nCopy} file${nCopy === 1 ? '' : 's'}` + (overwrites ? ` (${overwrites} overwritten)` : ''));
+      if(nNew) parts.push(`create ${nNew} folder${nNew === 1 ? '' : 's'}`);
+      if(nDel) parts.push(`delete ${nDel} item${nDel === 1 ? '' : 's'}`);
+      const r = await askChoice(
+        `Make "${node.path}" in ${sideLabel(dst)} match ${sideLabel(src)}?\nThis will ${parts.join(', ')} in "${dc[dst].name}" on disk.`,
+        [{ label: nDel ? 'Apply (deletes files)' : 'Apply', value: 'go', danger: !!nDel }, { label: 'Cancel', value: 'cancel', focus: true }],
+        'cancel');
+      if(r !== 'go') return;
+    }
+    let done = 0, failed = null;
+    for(const op of ops){
+      try{ await applyOp(op, src, dst); done++; }
+      catch(err){ failed = `${op.node.path}: ${describeError(err)}`; break; }
+    }
+    const sum = `${sideLabel(dst)}: ${done} of ${ops.length} change${ops.length === 1 ? '' : 's'} applied`
+      + (failed ? `; stopped at ${failed}.` : '.');
+    dc.staleNote = sum;
+    dc.keepStale = true;                 // runScan would otherwise reset the note
+    try{ refreshSide(dst); }finally{ dc.keepStale = false; }    // re-read what changed; the comparison follows by itself
+    if(failed) setMsg(sum, true);
+  }
+
+  function paintRows(force){
+    if(dc.view !== 'dir') return;
+    syncScrollbarWidth();
+    if(!dc.results) return;
+    renderDirGutters(false);
+    const list = $('dv-list');
+    const n = dc.visible.length;
+    const h = list.clientHeight || 600;
+    const first = Math.max(0, Math.floor((list.scrollTop - ROW_H) / ROW_H) - 6);
+    const last = Math.min(n - 1, Math.ceil((list.scrollTop + h) / ROW_H) + 6);
+    if(!force && first === vFirst && last === vLast) return;
+    vFirst = first; vLast = last;
+    const parts = [];
+    for(let i = first; i <= last; i++){
+      const node = dc.visible[i];
+      const st = STATUS[node.status];
+      const isDir = node.kind === 'dir';
+      const clickable = isDir ? node.list.length > 0 : node.status !== 'error';
+      const cls = `dv-row s-cell ${isDir ? 'dir' : 'file'}${clickable ? ' clickable' : ''}`
+        + (keyOf(node) === dc.selectedKey ? ' selected' : '');
+      parts.push(
+        `<div class="${cls}" data-i="${i}" style="top:${i * ROW_H}px"`
+        + (isDir && node.list.length ? ` role="button" aria-expanded="${node.expanded}"` : (clickable ? ' role="button"' : ''))
+        + '>'
+        + cellHtml(node, 'left')
+        + sepHtml(node, 'left', dc.mode === '3way' ? 'mid' : 'right')
+        + (dc.mode === '3way' ? cellHtml(node, 'mid') + sepHtml(node, 'mid', 'right') : '')
+        + cellHtml(node, 'right')
+        + '</div>');
+    }
+    $('dv-rows').innerHTML = parts.join('');
+  }
+
+  let paintQueued = false;
+  $('dv-list').addEventListener('scroll', () => {
+    if(paintQueued) return;
+    paintQueued = true;
+    positionDirHandles();
+    requestAnimationFrame(() => { paintQueued = false; paintRows(false); updateDirGutterViewport(); });
+  });
+  window.addEventListener('resize', () => paintRows(true));
+
+  function nodeFromEvent(e){
+    const el = e.target.closest ? e.target.closest('.dv-row') : null;
+    return el ? dc.visible[Number(el.dataset.i)] : null;
+  }
+  const keyOf = n => n.kind + ':' + n.path;
+  $('dv-rows').addEventListener('click', (e) => {
+    const act = e.target.closest ? e.target.closest('.dv-act') : null;
+    if(act){
+      e.stopPropagation();
+      const n = nodeFromEvent(e);
+      if(n) syncRow(n, act.dataset.src, act.dataset.dst);
+      return;
+    }
+    const node = nodeFromEvent(e);
+    if(!node) return;
+    dc.selectedKey = keyOf(node);
+    if(node.kind === 'dir'){ toggleDir(node, node.list.length ? !node.expanded : node.expanded); updateNavButtons(); return; }
+    // Files: a single click only selects; opening the text comparison needs a double-click.
+    $('dv-rows').querySelectorAll('.dv-row.selected').forEach(el => el.classList.remove('selected'));
+    const row = e.target.closest('.dv-row');
+    if(row) row.classList.add('selected');
+    updateNavButtons();
+  });
+  $('dv-rows').addEventListener('dblclick', (e) => {
+    if(e.target.closest && e.target.closest('.dv-act')) return;
+    const node = nodeFromEvent(e);
+    if(node && node.kind === 'file') activateRow(node.result);
+  });
+
+  /* ---------- First / Previous / Next / Last difference (same buttons as Text Compare) ----------
+     A "difference" is a file or empty folder that is not 'same'; folders themselves are not stops
+     (they only summarise what is below). Navigation is relative to the selected row and, like
+     Text Compare, does not wrap around: First/Previous are disabled when nothing differs before the
+     selection, Next/Last when nothing differs after it. Folders hiding the target are expanded. */
+  function indexTree(){
+    let ord = 0;
+    const diffs = [], byKey = new Map();
+    (function walk(n){
+      for(const c of n.list){
+        c.ord = ord++;
+        byKey.set(keyOf(c), c);
+        if(c.kind === 'dir'){
+          if(!c.list.length && c.status !== 'same') diffs.push(c);
+          walk(c);
+        } else if(c.status !== 'same') diffs.push(c);
+      }
+    })(dc.tree);
+    dc.diffNodes = diffs;
+    dc.nodeByKey = byKey;
+  }
+  function currentOrd(){
+    const n = dc.selectedKey && dc.nodeByKey ? dc.nodeByKey.get(dc.selectedKey) : null;
+    return n ? n.ord : -1;                                  // -1: nothing selected yet
+  }
+  function diffIndexAfter(ord){                             // index of the first difference with order > ord
+    const a = dc.diffNodes;
+    let lo = 0, hi = a.length;
+    while(lo < hi){ const mid = (lo + hi) >> 1; if(a[mid].ord > ord) hi = mid; else lo = mid + 1; }
+    return lo;
+  }
+  function updateNavButtons(){
+    const cur = currentOrd();
+    const total = dc.results ? dc.diffNodes.length : 0;
+    const hasNext = total > 0 && diffIndexAfter(cur) < total;
+    const hasPrev = total > 0 && diffIndexAfter(cur - 1) > 0;
+    $('dv-nav-first').disabled = !hasPrev;
+    $('dv-nav-prev').disabled = !hasPrev;
+    $('dv-nav-next').disabled = !hasNext;
+    $('dv-nav-last').disabled = !hasNext;
+  }
+  function goToDiffNode(target){
+    const a = dc.diffNodes;
+    if(!dc.results || !a.length) return;
+    const cur = currentOrd();
+    let node;
+    if(target === 'first') node = a[0];
+    else if(target === 'last') node = a[a.length - 1];
+    else if(target === 'next') node = a[Math.min(diffIndexAfter(cur), a.length - 1)];
+    else node = a[Math.max(diffIndexAfter(cur - 1) - 1, 0)];
+    let opened = false;
+    for(let p = node.parent; p && p.depth >= 0; p = p.parent) if(!p.expanded){ p.expanded = true; opened = true; }
+    if(opened) rebuildVisible();
+    const idx = dc.visible.indexOf(node);
+    if(idx >= 0) selectIndex(idx);
+    $('dv-list').focus({ preventScroll: true });            // keep arrow-key navigation working afterwards
+  }
+
+  // Keyboard: Up/Down (also PageUp/PageDown/Home/End) move the selected row; Left/Right collapse/expand
+  // folders; Enter/Space toggles a folder or opens the file in Text Compare.
+  function selectedIndex(){
+    return dc.selectedKey ? dc.visible.findIndex(n => keyOf(n) === dc.selectedKey) : -1;
+  }
+  function selectIndex(i){
+    if(!dc.visible.length) return;
+    i = Math.max(0, Math.min(dc.visible.length - 1, i));
+    dc.selectedKey = keyOf(dc.visible[i]);
+    const list = $('dv-list');
+    const top = i * ROW_H, h = list.clientHeight;
+    if(top < list.scrollTop) list.scrollTop = top;                                  // keep the row in view
+    else if(h && top + ROW_H > list.scrollTop + h) list.scrollTop = top + ROW_H - h;
+    paintRows(true);
+    updateNavButtons();
+  }
+  $('dv-list').addEventListener('keydown', (e) => {
+    if(!dc.results || !dc.visible.length || e.altKey || e.ctrlKey || e.metaKey) return;
+    const cur = selectedIndex();
+    const node = cur >= 0 ? dc.visible[cur] : null;
+    const page = Math.max(1, Math.floor(($('dv-list').clientHeight || ROW_H * 10) / ROW_H) - 1);
+    switch(e.key){
+      case 'ArrowDown': e.preventDefault(); selectIndex(cur < 0 ? 0 : cur + 1); break;
+      case 'ArrowUp':   e.preventDefault(); selectIndex(cur < 0 ? 0 : cur - 1); break;
+      case 'PageDown':  e.preventDefault(); selectIndex(cur < 0 ? 0 : cur + page); break;
+      case 'PageUp':    e.preventDefault(); selectIndex(cur < 0 ? 0 : cur - page); break;
+      case 'Home':      e.preventDefault(); selectIndex(0); break;
+      case 'End':       e.preventDefault(); selectIndex(dc.visible.length - 1); break;
+      case 'ArrowRight':
+        if(node && node.kind === 'dir' && node.list.length){
+          e.preventDefault();
+          if(!node.expanded) toggleDir(node, true); else selectIndex(cur + 1);
+        }
+        break;
+      case 'ArrowLeft':
+        if(node){
+          e.preventDefault();
+          if(node.kind === 'dir' && node.expanded) toggleDir(node, false);
+          else if(node.parent && node.parent.depth >= 0) selectIndex(dc.visible.indexOf(node.parent));   // go to the parent folder
+        }
+        break;
+      case 'Enter':
+      case ' ':
+        if(node){
+          e.preventDefault();
+          if(node.kind === 'dir'){ if(node.list.length) toggleDir(node, !node.expanded); }
+          else activateRow(node.result);
+        }
+        break;
+    }
+  });
+
+  function activateRow(r){
+    if(r.status !== 'error'){ openFileInTextCompare(r); return; }
+    if(r.status === 'error'){
+      setMsg(`${r.path}: ${r.error || 'could not be read'}.`, true);
+    }
+  }
+
+  /* ---------- Hand a Different file over to the existing Text Compare ---------- */
+  async function sniffBinary(file){
+    const head = new Uint8Array(await file.slice(0, SNIFF_BYTES).arrayBuffer());
+    return head.indexOf(0) !== -1;
+  }
+  function countLines(t){
+    let c = 1, i = -1;
+    while((i = t.indexOf('\n', i + 1)) !== -1) c++;
+    return c;
+  }
+
+  async function openFileInTextCompare(result){
+    const sides = activeSides();
+    if(dc.opening || !result || !sides.some(sd => result[sd]) || result.status === 'error') return;
+    // A file that exists on some sides only is opened too; the other columns stay blank.
+    const bad = sides.map(sd => result[sd]).find(e => e && (e.error || !e.file));
+    if(bad){ setMsg(`${result.path}: ${bad.error || 'could not be read'}.`, true); return; }
+    dc.opening = true;
+    try{
+      dc.selectedKey = 'file:' + result.path;
+      paintRows(true);
+      setMsg(`Reading ${result.path}...`);
+      const texts = {};
+      try{
+        const bins = await Promise.all(sides.map(sd => result[sd] ? sniffBinary(result[sd].file) : false));
+        if(bins.some(Boolean)){
+          setMsg(`${result.path} looks like a binary file, so it can't be shown as a line-by-line text comparison.`, true);
+          return;
+        }
+        const read = await Promise.all(sides.map(sd => result[sd] ? result[sd].file.text() : ''));
+        sides.forEach((sd, i) => { texts[sd] = read[i]; });
+      }catch(err){
+        setMsg(`Could not read ${result.path} - ${describeError(err)}. Select the directories again and retry.`, true);
+        return;
+      }
+      // The existing diff engine builds an (n+1) x (m+1) table; warn before huge inputs.
+      const lines = sides.map(sd => countLines(texts[sd]));
+      let worst = 0, worstLabel = '';
+      for(let i = 0; i < lines.length; i++) for(let j = i + 1; j < lines.length; j++){
+        if(lines[i] * lines[j] > worst){ worst = lines[i] * lines[j]; worstLabel = `${lines[i].toLocaleString()} x ${lines[j].toLocaleString()}`; }
+      }
+      if(worst > MAX_DIFF_CELLS){
+        const r = await askChoice(
+          `${result.path} is large (${worstLabel} lines).\nThe line comparison may be slow or run out of memory.`,
+          [
+            { label: 'Compare anyway', value: 'go', danger: true },
+            { label: 'Cancel', value: 'cancel', focus: true },
+          ], 'cancel');
+        if(r !== 'go'){ setMsg('Cancelled.'); return; }
+      }
+      if(!await confirmDiscardFor(sides, sides.length === 3 ? 'Loading this file set' : 'Loading this file pair')){
+        setMsg('Cancelled - unsaved changes in Text Compare were kept.');
+        return;
+      }
+      setViewMode('text');
+      await nextFrame();                       // panes are visible again before they are measured
+      // Match Text Compare's 2-way / 3-way mode to this comparison.
+      const wantMode = sides.length === 3 ? '3way' : '2way';
+      if(state.mode !== wantMode) $(wantMode === '3way' ? 'btn-3way' : 'btn-2way').click();
+      for(const sd of sides){
+        const e = result[sd];
+        applyLoadedFile(sd, texts[sd], e ? `${dc[sd].name}/${result.path}` : '', null, null);
+        const c = state.cols[sd];
+        // Refresh / Re-compare re-read the file through its handle. Only c.handle is set, not the save
+        // handle, so Save still never writes to the original (the directory was opened read-only).
+        if(e && e.handle){ c.handle = e.handle; c.diskText = texts[sd]; }
+        if(!e) c.userLoaded = false;          // a side with no file has nothing to refresh
+      }
+      for(const sd of sides) syncPathInput(sd);
+      recompute();
+      updateFileUI();
+      try{ if(state.diffBlocks.length) goToDiff('first'); }catch(_){ /* navigation is optional */ }
+      const onlySide = ['left', 'mid', 'right'].includes(result.status) ? result.status : null;
+      setStatus(onlySide
+        ? `${result.path}: exists only on the ${onlySide === 'mid' ? 'middle' : onlySide} side`
+        : state.diffBlocks.length
+        ? `Comparing ${result.path} - ${state.diffBlocks.length} difference block(s)`
+        : result.status === 'same'
+          ? `${result.path}: the ${sides.length === 3 ? 'three' : 'two'} files are identical`
+          : `${result.path}: bytes differ but no line differences are shown (e.g. line endings, BOM or encoding)`);
+    }finally{
+      dc.opening = false;
+    }
+  }
+
+
+  /* ---------- Drag & drop of directories (mirrors Text Compare's file drop) ---------- */
+  function readAllEntries(reader){
+    return new Promise((resolve, reject) => {
+      const all = [];
+      const next = () => reader.readEntries(batch => {
+        if(!batch.length) resolve(all); else { all.push(...batch); next(); }
+      }, reject);
+      next();
+    });
+  }
+  const entryToFile = entry => new Promise((resolve, reject) => entry.file(resolve, reject));
+
+  // Fallback for browsers without getAsFileSystemHandle (Firefox, Safari): the
+  // legacy FileSystemEntry API, read recursively.
+  async function scanDirectoryEntry(rootEntry, ctl){
+    const files = [];
+    const errors = [];
+    const dirs = [];
+    const stack = [{ entry: rootEntry, prefix: '' }];
+    let lastYield = performance.now();
+    while(stack.length){
+      const { entry, prefix } = stack.pop();
+      try{
+        const children = await readAllEntries(entry.createReader());
+        if(prefix) dirs.push({ path: prefix.slice(0, -1), empty: children.length === 0 });
+        for(const child of children){
+          ctl.check();
+          const rel = prefix + child.name;
+          if(child.isDirectory){ stack.push({ entry: child, prefix: rel + '/' }); continue; }
+          try{
+            const file = await entryToFile(child);
+            files.push({ path: rel, name: child.name, size: file.size, file });
+          }catch(err){
+            errors.push({ path: rel, message: describeError(err) });
+            files.push({ path: rel, name: child.name, size: null, file: null, error: describeError(err) });
+          }
+          if(performance.now() - lastYield > 40){
+            ctl.progress(files.length);
+            await yieldUi();
+            lastYield = performance.now();
+          }
+        }
+      }catch(err){
+        if(err === CANCELLED) throw err;
+        if(prefix && !dirs.some(d => d.path === prefix.slice(0, -1))) dirs.push({ path: prefix.slice(0, -1), empty: false });
+        errors.push({ path: prefix || '/', message: describeError(err) });
+      }
+    }
+    ctl.progress(files.length);
+    return { files, errors, dirs };
+  }
+
+  // Handles/entries must be grabbed synchronously off the drop event, before any await.
+  function loadDroppedDirectory(side, dt){
+    const items = Array.from((dt && dt.items) || []).filter(it => it.kind === 'file');
+    if(!items.length){ setMsg(`${sideLabel(side)}: drop a directory (folder).`, true); return Promise.resolve(); }
+    const cands = items.map(it => {
+      let handleP = Promise.resolve(null);
+      try{
+        if(typeof it.getAsFileSystemHandle === 'function') handleP = Promise.resolve(it.getAsFileSystemHandle()).catch(() => null);
+      }catch(_){ /* fall through to the entry API */ }
+      let entry = null;
+      try{ if(typeof it.webkitGetAsEntry === 'function') entry = it.webkitGetAsEntry(); }catch(_){ /* ignore */ }
+      return { handleP, entry };
+    });
+    return (async () => {
+      const handles = await Promise.all(cands.map(c => c.handleP));
+      // Directories in drop order (a candidate is a handle, or a legacy entry when no handle exists).
+      const dirs = [];
+      for(let i = 0; i < cands.length; i++){
+        const h = handles[i], en = cands[i].entry;
+        if(h && h.kind === 'directory') dirs.push({ handle: h });
+        else if(!h && en && en.isDirectory) dirs.push({ entry: en });
+      }
+      if(!dirs.length){
+        setMsg(`${sideLabel(side)}: only directories can be dropped here, not files.`, true);
+        return;
+      }
+      const start = (sd, d) => d.handle
+        ? runScan(sd, d.handle.name, d.handle, ctl => scanDirectory(d.handle, ctl))
+        : runScan(sd, d.entry.name, null, ctl => scanDirectoryEntry(d.entry, ctl));
+      if(dirs.length >= 3){
+        // Three or more at once: switch to 3-way, first/second/third -> Left/Middle/Right (extras are ignored).
+        setDirMode('3way');
+        await Promise.all([start('left', dirs[0]), start('mid', dirs[1]), start('right', dirs[2])]);
+      } else if(dirs.length === 2){
+        // Two at once: switch to 2-way, first -> Left, second -> Right.
+        setDirMode('2way');
+        await Promise.all([start('left', dirs[0]), start('right', dirs[1])]);
+      } else {
+        if(side === 'mid') setDirMode('3way');
+        await start(side, dirs[0]);
+      }
+    })();
+  }
+
+  // Is the payload made of directories or of files? Must be called synchronously inside the drop event.
+  function classifyDrop(dt){
+    let dirs = 0, files = 0;
+    for(const it of Array.from((dt && dt.items) || [])){
+      if(it.kind !== 'file') continue;
+      let en = null;
+      try{ if(typeof it.webkitGetAsEntry === 'function') en = it.webkitGetAsEntry(); }catch(_){ /* treat as file */ }
+      if(en && en.isDirectory) dirs++; else files++;
+    }
+    return { dirs, files };
+  }
+
+  // Drop in Directory Compare: directories load here, plain files switch to Text Compare.
+  function handleDropInDirMode(side, dt){
+    const k = classifyDrop(dt);
+    if(k.dirs === 0 && k.files > 0){
+      setViewMode('text');
+      loadDroppedFile(side, dt);        // existing Text Compare loader (grabs the file handles synchronously)
+      return Promise.resolve();
+    }
+    return loadDroppedDirectory(side, dt);
+  }
+
+  // el: drop target; sideOf(e): which side a drop at this event loads; mark(side|null): highlight.
+  function setupDirDropZone(el, sideOf, mark){
+    let depth = 0;
+    el.addEventListener('dragenter', (e) => {
+      if(!isFileDrag(e)) return;
+      e.preventDefault();
+      depth++;
+      mark(sideOf(e));
+    });
+    el.addEventListener('dragover', (e) => {
+      if(!isFileDrag(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      mark(sideOf(e));
+    });
+    el.addEventListener('dragleave', (e) => {
+      if(!isFileDrag(e)) return;
+      depth = Math.max(0, depth - 1);
+      if(depth === 0) mark(null);
+    });
+    el.addEventListener('drop', (e) => {
+      if(!isFileDrag(e)) return;
+      e.preventDefault();
+      depth = 0;
+      const side = sideOf(e);
+      mark(null);
+      handleDropInDirMode(side, e.dataTransfer);
+    });
+  }
+
+  // Drop in Text Compare: directories switch to Directory Compare (files keep the existing behavior).
+  document.addEventListener('drop', (e) => {
+    if(dc.view !== 'text' || !isFileDrag(e)) return;
+    const target = e.target && e.target.closest ? e.target.closest('#editor-wrap') : null;
+    if(!target) return;
+    if(classifyDrop(e.dataTransfer).dirs === 0) return;      // plain files: Text Compare handles them
+    e.preventDefault();
+    e.stopPropagation();
+    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+    const pane = e.target.closest('#pane-left,#pane-mid,#pane-right');
+    let side;
+    if(pane && pane.id === 'pane-left') side = 'left';
+    else if(pane && pane.id === 'pane-mid') side = 'mid';
+    else if(pane && pane.id === 'pane-right') side = 'right';
+    else{
+      const r = target.getBoundingClientRect();
+      const f = (e.clientX - r.left) / Math.max(1, r.width);
+      side = state.mode === '3way' ? (f < 1 / 3 ? 'left' : f < 2 / 3 ? 'mid' : 'right') : (f < 0.5 ? 'left' : 'right');
+    }
+    loadDroppedDirectory(side, e.dataTransfer);               // collects the handles synchronously
+    setViewMode('dir');
+  }, true);
+
+  (function setupDirDrop(){
+    const wrap = $('dv-listwrap');
+    setupDirDropZone(wrap, (e) => {
+      const r = wrap.getBoundingClientRect();
+      const sbw = parseFloat(wrap.style.getPropertyValue('--dv-sbw')) || 0;
+      const f = (e.clientX - r.left) / Math.max(1, r.width - sbw);        // 0..1 across the list
+      if(dc.mode === '3way') return f < 1 / 3 ? 'left' : f < 2 / 3 ? 'mid' : 'right';
+      return f < 0.5 ? 'left' : 'right';
+    }, (side) => {
+      wrap.classList.toggle('drop-left', side === 'left');
+      wrap.classList.toggle('drop-mid', side === 'mid');
+      wrap.classList.toggle('drop-right', side === 'right');
+    });
+    // Dropping on a side's path field works too, like the path fields in Text Compare.
+    ['left', 'mid', 'right'].forEach(side => {
+      const col = $('dv-name-' + side).closest('.dv-col');
+      setupDirDropZone(col, () => side, (sd) => col.classList.toggle('drag-over', sd === side));
+    });
+  })();
+
+  /* ---------- 2-way / 3-way switch (Directory Compare's own setting) ---------- */
+  function setDirMode(mode){
+    if(mode === dc.mode) return;
+    dc.mode = mode;
+    const three = mode === '3way';
+    document.querySelectorAll('.dv-col-mid, .dv-div-mid').forEach(el => el.classList.toggle('hidden', !three));
+    $('dv-listwrap').classList.toggle('three', three);
+    setSwapTargets();
+    $('dv-handle-2').classList.toggle('hidden', !three);
+    resetDirWidths();
+    $('dv-mode-2way').classList.toggle('active', !three);
+    $('dv-mode-3way').classList.toggle('active', three);
+    // Results of the other layout no longer apply: start over with what is already scanned.
+    cancelCompare(true);
+    clearResults();
+    updateCompareButton();
+    updateHint();
+    paintRows(true);
+    setStatus(three ? 'Switched to 3-way directory compare' : 'Switched to 2-way directory compare');
+    maybeAutoCompare();
+  }
+
+  function setSwapTargets(){
+    const three = dc.mode === '3way';
+    const first = $('dv-swap-1');
+    first.dataset.swapB = three ? 'mid' : 'right';
+    const t1 = three ? 'Swap left and middle directories' : 'Swap left and right directories';
+    first.title = t1; first.setAttribute('aria-label', t1);
+    $('dv-swap-2').title = 'Swap middle and right directories';
+    $('dv-swap-2').setAttribute('aria-label', 'Swap middle and right directories');
+  }
+
+  /* ---------- Wiring ---------- */
+  for(const b of document.querySelectorAll('.dv-swap-btn')){
+    b.innerHTML = document.querySelector('.pathrow .swap-btn').innerHTML;       // same icon as Text Compare
+    b.addEventListener('click', () => swapDirs(b.dataset.swapA, b.dataset.swapB));
+  }
+  setSwapTargets();
+  applyDirWidths();
+  for(const [id, src] of [['dv-mode-2way', 'btn-2way'], ['dv-mode-3way', 'btn-3way']]){
+    const b = $(id), o = $(src);
+    b.innerHTML = o.innerHTML;                     // same icons as the Text Compare buttons
+    b.title = o.title; b.setAttribute('aria-label', o.title);
+  }
+  $('dv-mode-2way').addEventListener('click', () => setDirMode('2way'));
+  $('dv-mode-3way').addEventListener('click', () => setDirMode('3way'));
+  $('dv-pick-mid').addEventListener('click', () => selectDirectory('mid'));
+  for(const sd of ['left', 'mid', 'right']){
+    const b = $('dv-refresh-' + sd);
+    b.innerHTML = $('btn-recompute').innerHTML;            // same icon as Text Compare's Refresh / Re-compare
+    b.addEventListener('click', () => refreshSide(sd));
+  }
+  for(const t of ['first', 'prev', 'next', 'last']){
+    const b = $('dv-nav-' + t), o = $('nav-' + t);
+    b.innerHTML = o.innerHTML;                     // same icons and tooltips as the Text Compare buttons
+    b.title = o.title; b.setAttribute('aria-label', o.title);
+    b.addEventListener('click', () => goToDiffNode(t));
+  }
+  $('mode-text').addEventListener('click', () => setViewMode('text'));
+  $('mode-dir').addEventListener('click', () => setViewMode('dir'));
+  $('dv-pick-left').addEventListener('click', () => selectDirectory('left'));
+  $('dv-pick-right').addEventListener('click', () => selectDirectory('right'));
+  $('dv-compare').addEventListener('click', () => {
+    if(['left', 'mid', 'right'].some(sd => dc[sd].scanning)){ cancelScans(); return; }
+    if(dc.comparing){ cancelCompare(); return; }
+    rescanAndCompare();
+  });
+
+  updateSideUI('left');
+  updateSideUI('mid');
+  updateSideUI('right');
+  updateCompareButton();
+  updateHint();
+  if(!pickerSupported() && !fallbackSupported()){
+    $('dv-pick-left').disabled = true;
+    $('dv-pick-mid').disabled = true;
+    $('dv-pick-right').disabled = true;
+  }
+
+  // Expose for debugging / tests only (read-only view of the Directory Compare API).
+  window.DirCompare = { selectDirectory, scanDirectory, buildFileIndex, compareDirectories, compareFileContents,
+    renderDirectoryCompareResults, openFileInTextCompare, setViewMode, setDirMode, loadDroppedDirectory, _state: dc };
+})();
 
 /* ======================================================================
    Light / Dark theme toggle
