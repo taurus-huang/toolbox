@@ -5,7 +5,7 @@
 <meta name="viewport" id="viewport-meta" content="width=device-width, initial-scale=1.0">
 <script>
 /* Phones / small touch devices: keep the original wide desktop layout
-   instead of reflowing to a narrow screen. A fixed 1280px-wide layout
+   instead of reflowing to a narrow screen. A fixed 1100px-wide layout
    viewport is used (browser auto-fits it to the screen width at first),
    and the user can pan with one finger and pinch-zoom freely. */
 (function(){
@@ -14,7 +14,7 @@
     var isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
     if(isTouch && shortSide < 900){
       document.getElementById('viewport-meta').setAttribute('content',
-        'width=1280, minimum-scale=0.1, maximum-scale=5, user-scalable=yes');
+        'width=1100, minimum-scale=0.1, maximum-scale=5, user-scalable=yes');
       document.documentElement.classList.add('force-desktop');
     }
   }catch(e){ /* ignore */ }
@@ -23,11 +23,11 @@
 <title>Diff Tool</title>
 <meta name="tool-name" content="Diff Tool">
 <meta name="tool-version" content="">
-<meta name="tool-desc" content="Supports text / directory comparison (runs locally in the browser).">
-<meta name="tool-desc" content="Supports 2-way / 3-way text comparison.">
 <meta name="tool-desc" content="Supports drag-and-drop file uploading.">
+<meta name="tool-desc" content="Supports 2-way / 3-way text comparison.">
 <meta name="tool-desc" content="Identifies discrepancies at block and inline levels.">
 <meta name="tool-desc" content="Provides intuitive action buttons allowing merge discrepancies.">
+<meta name="tool-desc" content="Supports directory comparison (read-only, runs locally in the browser).">
 <style>
   :root{
     --bg:#f0f1f4;
@@ -38,6 +38,7 @@
     --text:#1e1f22;
     --muted:#6b6e76;
     --accent:#2570c2;
+    --sel-blue:#3b82f6;   /* background of selected buttons / tabs: the same blue in light and dark */
     --line-num:#8a8d96;
     --diff-mod:#7a7a00;
     --diff-mod-border:#c8c800;
@@ -141,10 +142,50 @@
   }
   .tbtn:not(:disabled):hover{background:var(--btn-hover);border-color:var(--accent);}
   .tbtn:not(:disabled):active{background:var(--accent);border-color:var(--accent);color:#fff;}
-  .tbtn.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}
+  .tbtn.active{background:var(--sel-blue);border-color:var(--sel-blue);color:var(--text);}
   .tbtn:disabled{opacity:.4;cursor:default;pointer-events:none;}
   .tbtn svg{width:18px;height:18px;flex-shrink:0;display:block;}
   .actbtn svg{width:18px;height:18px;display:block;}
+
+  /* Tab strip (one tab per comparison), between the toolbar and the path bar */
+  .tabbar{
+    display:flex;align-items:flex-end;gap:2px;flex-shrink:0;padding:4px 6px 0;
+    background:var(--bg);
+    /* The divider line is painted underneath the tabs (an inset shadow, not a border), so the selected tab,
+       which reaches the very bottom edge, covers its own stretch of the line with its background. */
+    box-shadow:inset 0 -1px 0 var(--border);
+    overflow-x:auto;overflow-y:hidden;scrollbar-width:none;
+  }
+  .tabbar::-webkit-scrollbar{display:none;}
+  .tab{
+    position:relative;display:flex;align-items:center;gap:6px;flex:0 1 190px;min-width:64px;height:30px;
+    padding:0 6px 0 10px;border:1px solid transparent;border-bottom:none;border-radius:8px 8px 0 0;
+    color:var(--muted);cursor:pointer;user-select:none;-webkit-user-select:none;
+  }
+  .tab:hover{background:var(--toolbar);}
+  .tab.active{
+    background:var(--sel-blue);border-color:var(--sel-blue);border-bottom:none;color:var(--text);
+    z-index:1;
+  }
+  /* Light theme: selected buttons / tab show their icon and text in white */
+  html:not([data-theme="dark"]) .mbtn.active,
+  html:not([data-theme="dark"]) .tbtn.active,
+  html:not([data-theme="dark"]) .tab.active{color:#fff;}
+  .tab .tab-ico{width:15px;height:15px;flex-shrink:0;display:block;}
+  .tab .tab-name{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;}
+  .tab .tab-close{
+    flex-shrink:0;width:18px;height:18px;padding:0;border:none;border-radius:50%;background:transparent;
+    color:inherit;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;
+  }
+  .tab:hover .tab-close,.tab.active .tab-close{opacity:.8;}
+  .tab .tab-close:hover{background:var(--btn-hover);opacity:1;}
+  .tab .tab-close svg{width:10px;height:10px;display:block;pointer-events:none;}
+  .tab-add{
+    flex-shrink:0;width:26px;height:26px;margin:0 0 3px 2px;padding:0;border:none;border-radius:50%;
+    background:transparent;color:var(--muted);display:flex;align-items:center;justify-content:center;cursor:pointer;
+  }
+  .tab-add:hover{background:var(--btn-hover);color:var(--text);}
+  .tab-add svg{width:14px;height:14px;display:block;pointer-events:none;}
 
   /* Path bar */
   .pathbar{
@@ -559,7 +600,7 @@
   .mbtn:first-child{border-radius:6px 0 0 6px;}
   .mbtn:last-child{border-radius:0 6px 6px 0;margin-left:-1px;}
   .mbtn:hover{background:var(--btn-hover);border-color:var(--accent);position:relative;}
-  .mbtn.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600;position:relative;}
+  .mbtn.active{background:var(--sel-blue);border-color:var(--sel-blue);color:var(--text);font-weight:600;position:relative;}
   .mbtn:focus-visible{outline:2px solid var(--accent);outline-offset:1px;position:relative;}
 
   /* In Directory Compare mode the text-compare chrome is hidden (not
@@ -765,6 +806,9 @@
     </button>
   </div>
 </div>
+
+<!-- ============ TAB STRIP ============ -->
+<div class="tabbar" id="tabbar" role="tablist" aria-label="Comparisons"></div>
 
 <!-- ============ PATH BAR ============ -->
 <div class="pathbar" id="pathbar">
@@ -4963,7 +5007,7 @@ window.addEventListener('resize', ()=>{
 });
 
 /* ======================================================================
-   Directory Compare
+   Directory Compare (Phase 1)
    Kept separate from the text-compare state: everything below lives in its
    own closure and only touches the text-compare side through the existing
    helpers (applyLoadedFile / recompute / confirmDiscardFor ...).
@@ -6413,18 +6457,18 @@ window.addEventListener('resize', ()=>{
           ], 'cancel');
         if(r !== 'go'){ setMsg('Cancelled.'); return; }
       }
-      if(!await confirmDiscardFor(sides, sides.length === 3 ? 'Loading this file set' : 'Loading this file pair')){
-        setMsg('Cancelled - unsaved changes in Text Compare were kept.');
-        return;
-      }
-      setViewMode('text');
+      // The file comparison gets a tab of its own; this directory comparison stays as it is in its tab.
+      const dirNames = {};
+      for(const sd of sides) dirNames[sd] = dc[sd].name;
+      dc.opening = false;                      // belongs to the directory tab that is being left
+      window.TabsApi.openTextTab();
       await nextFrame();                       // panes are visible again before they are measured
       // Match Text Compare's 2-way / 3-way mode to this comparison.
       const wantMode = sides.length === 3 ? '3way' : '2way';
       if(state.mode !== wantMode) $(wantMode === '3way' ? 'btn-3way' : 'btn-2way').click();
       for(const sd of sides){
         const e = result[sd];
-        applyLoadedFile(sd, texts[sd], e ? `${dc[sd].name}/${result.path}` : '', null, null);
+        applyLoadedFile(sd, texts[sd], e ? `${dirNames[sd]}/${result.path}` : '', null, null);
         const c = state.cols[sd];
         // Refresh / Re-compare re-read the file through its handle. Only c.handle is set, not the save
         // handle, so Save still never writes to the original (the directory was opened read-only).
@@ -6699,8 +6743,15 @@ window.addEventListener('resize', ()=>{
     b.title = o.title; b.setAttribute('aria-label', o.title);
     b.addEventListener('click', () => goToDiffNode(t));
   }
-  $('mode-text').addEventListener('click', () => setViewMode('text'));
-  $('mode-dir').addEventListener('click', () => setViewMode('dir'));
+  // A tab that has nothing selected yet just changes its mode; a tab that already holds a comparison
+  // stays as it is and the other kind of comparison opens in a new tab.
+  function modeButton(mode){
+    if(mode === dc.view) return;
+    if(window.TabsApi && !window.TabsApi.isBlank()) window.TabsApi.addTab(mode);
+    else setViewMode(mode);
+  }
+  $('mode-text').addEventListener('click', () => modeButton('text'));
+  $('mode-dir').addEventListener('click', () => modeButton('dir'));
   $('dv-pick-left').addEventListener('click', () => selectDirectory('left'));
   $('dv-pick-right').addEventListener('click', () => selectDirectory('right'));
   $('dv-compare').addEventListener('click', () => {
@@ -6720,8 +6771,58 @@ window.addEventListener('resize', ()=>{
     $('dv-pick-right').disabled = true;
   }
 
+  /* ---------- Hooks for the tab strip: every tab keeps its own copy of the Directory Compare state ---------- */
+  function freshDirState(view){
+    return {
+      left: newSide(), mid: newSide(), right: newSide(),
+      mode: '2way', fr: [1, 1, 1], results: null, tree: null, diffNodes: [], nodeByKey: null, visible: [],
+      comparing: false, runId: dc.runId + 1000, selectedKey: null, opening: false, view: view || 'text',
+      savedScroll: null, fallbackSide: null, staleNote: '', keepStale: false, keepView: false, visVersion: 0,
+    };
+  }
+  // Stops work that is still running for the tab being left (it would otherwise write into the next tab).
+  function stopDirWork(){
+    cancelCompare(true);
+    if(['left', 'mid', 'right'].some(sd => dc[sd].scanning)) cancelScans();
+  }
+  // Redraws the whole Directory Compare view (and the view switch) from the current contents of `dc`.
+  function applyDirTabState(scroll){
+    const three = dc.mode === '3way';
+    document.querySelectorAll('.dv-col-mid, .dv-div-mid').forEach(el => el.classList.toggle('hidden', !three));
+    $('dv-listwrap').classList.toggle('three', three);
+    setSwapTargets();
+    $('dv-handle-2').classList.toggle('hidden', !three);
+    $('dv-mode-2way').classList.toggle('active', !three);
+    $('dv-mode-3way').classList.toggle('active', three);
+    applyDirWidths();
+    const dir = dc.view === 'dir';
+    document.body.classList.toggle('dir-mode', dir);
+    $('dir-view').classList.toggle('hidden', !dir);
+    $('mode-text').classList.toggle('active', !dir);
+    $('mode-dir').classList.toggle('active', dir);
+    $('mode-text').setAttribute('aria-pressed', String(!dir));
+    $('mode-dir').setAttribute('aria-pressed', String(dir));
+    gutterKey = '';
+    vFirst = vLast = -1;
+    if(dc.results && dc.tree) rebuildVisible();
+    else{
+      $('dv-rows').style.height = '0px';
+      $('dv-rows').innerHTML = '';
+      for(const id of ['dv-gutter-l-track', 'dv-gutter-r-track']) $(id).innerHTML = '';
+    }
+    for(const sd of ['left', 'mid', 'right']) updateSideUI(sd);
+    updateCompareButton();
+    updateHint();
+    updateNavButtons();
+    paintRows(true);
+    renderDirGutters(true);
+    syncScrollbarWidth();
+    if(scroll){ $('dv-list').scrollTop = scroll[0]; $('dv-list').scrollLeft = scroll[1]; }
+  }
+
   // Expose for debugging / tests only (read-only view of the Directory Compare API).
-  window.DirCompare = { selectDirectory, scanDirectory, buildFileIndex, compareDirectories, compareFileContents,
+  window.DirCompare = {
+    _tabs: { fresh: freshDirState, stop: stopDirWork, apply: applyDirTabState }, selectDirectory, scanDirectory, buildFileIndex, compareDirectories, compareFileContents,
     renderDirectoryCompareResults, openFileInTextCompare, setViewMode, setDirMode, loadDroppedDirectory, _state: dc };
 })();
 
@@ -6758,6 +6859,213 @@ window.addEventListener('resize', ()=>{
     applyTheme(next);
     try{ localStorage.setItem('difftool-theme', next); }catch(e){ /* ignore */ }
   });
+})();
+
+/* ======================================================================
+   Tabs: every comparison (file or directory) lives in its own tab.
+   A tab keeps its own copy of the Text Compare state and of the Directory
+   Compare state; switching copies the chosen tab's state into the live
+   objects (`state`, DirCompare._state) and redraws. Scans or comparisons
+   still running in the tab being left are stopped (Re-compare restarts them).
+   ====================================================================== */
+(function(){
+  const bar = document.getElementById('tabbar');
+  const dcApi = window.DirCompare._tabs;
+  const dc = window.DirCompare._state;
+  const ICON_FILE = '<svg class="tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5"/></svg>';
+  const ICON_DIR = '<svg class="tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h8a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></svg>';
+  const ICON_X = '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg>';
+  const ICON_PLUS = '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><line x1="7" y1="2" x2="7" y2="12"/><line x1="2" y1="7" x2="12" y2="7"/></svg>';
+  const COLS = ['left', 'mid', 'right'];
+
+  function freshTextState(){
+    return {
+      mode: '2way',
+      cols: { left: makeColState(), mid: makeColState(), right: makeColState() },
+      rows: [], diffBlocks: [], currentDiffIndex: -1,
+      cursorRow: null, cursorCol: null, cursorGapAnchor: null,
+      connectorButtonsLM: [], connectorButtonsMR: [],
+    };
+  }
+  let nextId = 1;
+  const tabs = [];
+  let active = null;
+
+  function newTab(view){
+    const t = { id: nextId++, st: freshTextState(), dc: null, tscroll: null, dscroll: null, last: null };
+    t.dc = Object.assign({}, window.DirCompare._tabs.fresh(view));
+    return t;
+  }
+  const baseName = p => String(p || '').split(/[\\/]/).filter(Boolean).pop() || '';
+
+  // What a tab shows: icon kind, label and tooltip, derived from the live objects (active tab) or its saved copy.
+  function describe(t){
+    const live = t === active;
+    const st = live ? state : t.st, d = live ? dc : t.dc;
+    const isDir = d.view === 'dir';
+    let names = [], full = [], dirty = false;
+    if(isDir){
+      for(const sd of (d.mode === '3way' ? COLS : ['left', 'right'])) if(d[sd].name){ names.push(d[sd].name); full.push(d[sd].name); }
+    } else {
+      for(const c of (st.mode === '3way' ? COLS : ['left', 'right'])){
+        const cs = st.cols[c];
+        if(cs.userLoaded && cs.fullPath){ names.push(baseName(cs.fullPath)); full.push(cs.fullPath); }
+        if(isDirty(cs)) dirty = true;
+      }
+    }
+    const label = names.length ? names.join(' \u2194 ') : (isDir ? 'New directory compare' : 'New file compare');
+    return { isDir, label: (dirty ? '\u25CF ' : '') + label, title: full.length ? full.join('\n') : label, dirty };
+  }
+
+  function tabHtml(t){
+    const info = describe(t);
+    t.last = info;
+    return `<div class="tab${t === active ? ' active' : ''}" role="tab" aria-selected="${t === active}" data-id="${t.id}" title="${esc2(info.title)}">`
+      + (info.isDir ? ICON_DIR : ICON_FILE)
+      + `<span class="tab-name">${esc2(info.label)}</span>`
+      + `<button type="button" class="tab-close" title="Close tab" aria-label="Close tab">${ICON_X}</button></div>`;
+  }
+  function esc2(x){ return String(x).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  function renderTabs(){
+    bar.innerHTML = tabs.map(tabHtml).join('')
+      + `<button type="button" class="tab-add" id="tab-add" title="New tab" aria-label="New tab">${ICON_PLUS}</button>`;
+    const el = bar.querySelector('.tab.active');
+    if(el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+  // Cheap periodic refresh: labels follow file names / dirty state / the Text-Directory switch without hooks everywhere.
+  function refreshLabels(){
+    for(const t of tabs){
+      const el = bar.querySelector(`.tab[data-id="${t.id}"]`);
+      if(!el) continue;
+      const info = describe(t), old = t.last;
+      if(old && old.label === info.label && old.title === info.title && old.isDir === info.isDir) continue;
+      t.last = info;
+      el.title = info.title;
+      el.querySelector('.tab-name').textContent = info.label;
+      if(!old || old.isDir !== info.isDir){
+        const ico = el.querySelector('.tab-ico');
+        const tmp = document.createElement('div');
+        tmp.innerHTML = info.isDir ? ICON_DIR : ICON_FILE;
+        ico.replaceWith(tmp.firstChild);
+      }
+    }
+  }
+  setInterval(refreshLabels, 300);
+
+  function capture(t){
+    try{ flushPendingEdits(); }catch(_){ /* nothing pending */ }
+    window.DirCompare._tabs.stop();
+    t.st = Object.assign({}, state);
+    t.dc = Object.assign({}, dc);
+    if(dc.view === 'dir'){
+      const l = document.getElementById('dv-list');
+      t.dscroll = [l.scrollTop, l.scrollLeft];
+      t.tscroll = dc.savedScroll || t.tscroll;
+    } else {
+      t.tscroll = COLS.map(c => { const el = document.getElementById('scroll-' + c); return el ? [el.scrollTop, el.scrollLeft] : [0, 0]; });
+    }
+  }
+  function load(t){
+    Object.assign(state, t.st);
+    Object.assign(dc, t.dc);
+    active = t;
+    dcApi.apply(t.dscroll);
+    setActiveModeButtons(state.mode);
+    resetPaneWidths();
+    recompute();
+    if(dc.view !== 'dir'){
+      window.dispatchEvent(new Event('resize'));
+      if(t.tscroll) COLS.forEach((c, i) => {
+        const el = document.getElementById('scroll-' + c);
+        if(el && t.tscroll[i]){ el.scrollTop = t.tscroll[i][0]; el.scrollLeft = t.tscroll[i][1]; }
+      });
+      updateGutterViewport();
+    }
+    updateFileUI();
+    setStatus(dc.view === 'dir' ? 'Directory Compare' : 'Text Compare');
+  }
+
+  function switchTo(t){
+    if(t === active) return;
+    capture(active);
+    load(t);
+    renderTabs();
+  }
+  function addTab(viewArg){
+    const view = viewArg || dc.view;         // a new tab starts in the same kind of comparison as the current one
+    const t = newTab(view);
+    capture(active);
+    tabs.push(t);
+    load(t);
+    renderTabs();
+    bar.scrollLeft = bar.scrollWidth;
+  }
+  async function closeTab(t){
+    const live = t === active;
+    const st = live ? state : t.st;
+    const dirtyCols = COLS.filter(c => isDirty(st.cols[c]));
+    if(dirtyCols.length){
+      const names = dirtyCols.map(c => st.cols[c].fullPath || c).join(', ');
+      const r = await askChoice(`Unsaved changes in: ${names}.\nClosing this tab will discard them.`,
+        [{ label: 'Discard changes and close', value: 'go', danger: true }, { label: 'Cancel', value: 'cancel', focus: true }], 'cancel');
+      if(r !== 'go') return;
+    }
+    const i = tabs.indexOf(t);
+    if(i < 0) return;
+    if(tabs.length === 1){                   // closing the only tab leaves a fresh one
+      const t2 = newTab(dc.view);
+      capture(t);
+      tabs[0] = t2;
+      load(t2);
+    } else if(live){
+      const next = tabs[i + 1] || tabs[i - 1];
+      capture(t);
+      tabs.splice(i, 1);
+      load(next);
+    } else {
+      tabs.splice(i, 1);
+    }
+    renderTabs();
+  }
+
+  // True while the current tab has nothing selected or loaded in the kind of comparison it is showing.
+  function isBlank(){
+    if(dc.view === 'dir') return !(dc.mode === '3way' ? COLS : ['left', 'right']).some(sd => dc[sd].name);
+    return !COLS.some(c => { const cs = state.cols[c]; return cs.userLoaded || cs.fullPath || cs.text; });
+  }
+  window.TabsApi = { openTextTab: () => addTab('text'), addTab, isBlank };
+
+  bar.addEventListener('click', (e) => {
+    if(e.target.closest('#tab-add')){ addTab(); return; }
+    const el = e.target.closest('.tab');
+    if(!el) return;
+    const t = tabs.find(x => x.id === Number(el.dataset.id));
+    if(!t) return;
+    if(e.target.closest('.tab-close')) closeTab(t); else switchTo(t);
+  });
+  bar.addEventListener('auxclick', (e) => {          // middle click closes, like a browser tab
+    if(e.button !== 1) return;
+    const el = e.target.closest('.tab');
+    const t = el && tabs.find(x => x.id === Number(el.dataset.id));
+    if(t){ e.preventDefault(); closeTab(t); }
+  });
+  bar.addEventListener('mousedown', (e) => { if(e.button === 1) e.preventDefault(); });
+
+  // Unsaved edits in tabs that are not on screen must also block leaving the page.
+  window.addEventListener('beforeunload', (e) => {
+    const risky = tabs.some(t => t !== active && COLS.some(c => {
+      const cs = t.st.cols[c];
+      return isDirty(cs) && normEol(cs.text) !== cs.exportedText;
+    }));
+    if(risky){ e.preventDefault(); e.returnValue = ''; return ''; }
+  });
+
+  // The first tab adopts whatever is on screen right now.
+  const first = { id: nextId++, st: null, dc: null, tscroll: null, dscroll: null, last: null };
+  tabs.push(first);
+  active = first;
+  renderTabs();
 })();
 </script>
 </body>
