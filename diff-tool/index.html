@@ -159,7 +159,7 @@
   .tabbar::-webkit-scrollbar{display:none;}
   .tab{
     position:relative;display:flex;align-items:center;gap:6px;flex:0 1 190px;min-width:64px;height:30px;
-    padding:0 6px 0 10px;border:1px solid transparent;border-bottom:none;border-radius:8px 8px 0 0;
+    padding:0 6px 0 10px;border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;
     color:var(--muted);cursor:pointer;user-select:none;-webkit-user-select:none;
   }
   .tab:hover{background:var(--toolbar);}
@@ -275,15 +275,21 @@
        clears it too, landing exactly at the true left edge. */
     scroll-padding-left:46px;
   }
-  .pane-scroll::-webkit-scrollbar{width:12px;height:12px;}
-  .pane-scroll::-webkit-scrollbar-track{background:var(--scrollbar-track);}
-  .pane-scroll::-webkit-scrollbar-thumb{background:var(--scrollbar-thumb);border-radius:6px;}
-  .pane-scroll::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-thumb-hover);}
-  .pane-scroll::-webkit-scrollbar-corner{background:var(--scrollbar-track);}
+  .pane-scroll::-webkit-scrollbar,
+  .dv-list::-webkit-scrollbar{width:12px;height:12px;}
+  .pane-scroll::-webkit-scrollbar-track,
+  .dv-list::-webkit-scrollbar-track{background:var(--scrollbar-track);}
+  .pane-scroll::-webkit-scrollbar-thumb,
+  .dv-list::-webkit-scrollbar-thumb{background:var(--scrollbar-thumb);border-radius:6px;}
+  .pane-scroll::-webkit-scrollbar-thumb:hover,
+  .dv-list::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-thumb-hover);}
+  .pane-scroll::-webkit-scrollbar-corner,
+  .dv-list::-webkit-scrollbar-corner{background:var(--scrollbar-track);}
   /* Scrollbar end arrow buttons (Chromium/WebKit only). Clicking or holding
      one nudges the pane by the browser's normal small scroll-button
      increment, same as a typical OS scrollbar's end arrows. */
-  .pane-scroll::-webkit-scrollbar-button{
+  .pane-scroll::-webkit-scrollbar-button,
+  .dv-list::-webkit-scrollbar-button{
     display:none; /* hidden by default; only the single outer arrow per end is re-enabled below -- */
     background-color:var(--btn-bg);background-repeat:no-repeat;background-position:center;background-size:8px 8px;
   }
@@ -292,20 +298,25 @@
      want the single arrow that points further outward at each end: the
      "decrement" (up/left) button at the :start end, and the "increment"
      (down/right) button at the :end end. */
-  .pane-scroll::-webkit-scrollbar-button:hover{background-color:var(--btn-hover);}
-  .pane-scroll::-webkit-scrollbar-button:vertical:start:decrement{
+  .pane-scroll::-webkit-scrollbar-button:hover,
+  .dv-list::-webkit-scrollbar-button:hover{background-color:var(--btn-hover);}
+  .pane-scroll::-webkit-scrollbar-button:vertical:start:decrement,
+  .dv-list::-webkit-scrollbar-button:vertical:start:decrement{
     display:block;height:12px;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M5 2L8 7H2Z' fill='%236b6e76'/%3E%3C/svg%3E");
   }
-  .pane-scroll::-webkit-scrollbar-button:vertical:end:increment{
+  .pane-scroll::-webkit-scrollbar-button:vertical:end:increment,
+  .dv-list::-webkit-scrollbar-button:vertical:end:increment{
     display:block;height:12px;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M5 8L2 3H8Z' fill='%236b6e76'/%3E%3C/svg%3E");
   }
-  .pane-scroll::-webkit-scrollbar-button:horizontal:start:decrement{
+  .pane-scroll::-webkit-scrollbar-button:horizontal:start:decrement,
+  .dv-list::-webkit-scrollbar-button:horizontal:start:decrement{
     display:block;width:12px;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 5L7 2V8Z' fill='%236b6e76'/%3E%3C/svg%3E");
   }
-  .pane-scroll::-webkit-scrollbar-button:horizontal:end:increment{
+  .pane-scroll::-webkit-scrollbar-button:horizontal:end:increment,
+  .dv-list::-webkit-scrollbar-button:horizontal:end:increment{
     display:block;width:12px;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M8 5L3 2V8Z' fill='%236b6e76'/%3E%3C/svg%3E");
   }
@@ -6970,8 +6981,10 @@ window.addEventListener('resize', ()=>{
     Object.assign(state, t.st);
     Object.assign(dc, t.dc);
     active = t;
-    dcApi.apply(t.dscroll);
+    // Set the 2-/3-way buttons while they are still hidden: if they were revealed first, the stale highlight would
+    // be shown (and animated away by the button's colour transition) before the right one lit up.
     setActiveModeButtons(state.mode);
+    dcApi.apply(t.dscroll);
     resetPaneWidths();
     recompute();
     if(dc.view !== 'dir'){
