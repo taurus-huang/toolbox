@@ -5029,6 +5029,9 @@ window.addEventListener('resize', ()=>{
 
   const ROW_H = 28;                    // px, must match .dv-row height in CSS
   const CHUNK_BYTES = 4 * 1024 * 1024; // content comparison reads 4 MiB at a time
+  const COMPARE_CONCURRENCY = 8;       // files compared at the same time
+  const SCAN_DIR_CONCURRENCY = 6;      // folders listed at the same time, per scanned directory
+  const SCAN_FILE_CONCURRENCY = 32;    // getFile() calls in flight at the same time, per scanned directory
   const SNIFF_BYTES = 8192;            // bytes inspected to detect binary files
   const MAX_DIFF_CELLS = 25e6;         // lineCountLeft * lineCountRight before warning (LCS table size)
   const CANCELLED = { cancelled: true };
@@ -5276,45 +5279,74 @@ window.addEventListener('resize', ()=>{
   }
 
   /* ---------- Recursive scan (File System Access API) ---------- */
+  function makeSemaphore(n){
+    let free = n;
+    const waiting = [];
+    return {
+      async acquire(){ if(free > 0){ free--; return; } await new Promise(res => waiting.push(res)); },
+      release(){ const next = waiting.shift(); if(next) next(); else free++; },
+    };
+  }
+
+  // Folders are listed and files opened several at a time: every getFile() is a round trip to the browser,
+  // so doing them one after another is what makes big trees slow.
   async function scanDirectory(directoryHandle, ctl){
     const files = [];
     const errors = [];
     const dirs = [];     // every sub-directory; `empty` = holds no files and no sub-directories
-    const stack = [{ handle: directoryHandle, prefix: '' }];
+    const dirSem = makeSemaphore(SCAN_DIR_CONCURRENCY);
+    const fileSem = makeSemaphore(SCAN_FILE_CONCURRENCY);
     let lastYield = performance.now();
-    while(stack.length){
-      const { handle, prefix } = stack.pop();
+    let lastProgress = 0;
+
+    const openFile = async (child, rel, name) => {
+      await fileSem.acquire();
+      try{
+        ctl.check();
+        const file = await child.getFile();
+        files.push({ path: rel, name, size: file.size, file, handle: child });
+      }catch(err){
+        if(err === CANCELLED) return;               // the scan as a whole reports the cancellation
+        const message = describeError(err);
+        errors.push({ path: rel, message });
+        files.push({ path: rel, name, size: null, file: null, error: message });
+      }finally{
+        fileSem.release();
+      }
+      const now = performance.now();
+      if(now - lastProgress > 100){ lastProgress = now; ctl.progress(files.length); }
+    };
+
+    const walk = async (handle, prefix) => {
+      const tasks = [];
       let count = 0;
+      await dirSem.acquire();
       try{
         for await (const [name, child] of handle.entries()){
           ctl.check();
           count++;
           const rel = prefix + name;
-          if(child.kind === 'directory'){
-            stack.push({ handle: child, prefix: rel + '/' });
-            continue;
-          }
-          try{
-            const file = await child.getFile();
-            files.push({ path: rel, name, size: file.size, file, handle: child });
-          }catch(err){
-            if(err === CANCELLED) throw err;
-            errors.push({ path: rel, message: describeError(err) });
-            files.push({ path: rel, name, size: null, file: null, error: describeError(err) });
-          }
+          if(child.kind === 'directory') tasks.push(walk(child, rel + '/'));
+          else tasks.push(openFile(child, rel, name));
           if(performance.now() - lastYield > 40){
-            ctl.progress(files.length);
-            await yieldUi();
             lastYield = performance.now();
+            await yieldUi();
           }
         }
         if(prefix) dirs.push({ path: prefix.slice(0, -1), empty: count === 0 });
       }catch(err){
-        if(err === CANCELLED) throw err;
-        if(prefix) dirs.push({ path: prefix.slice(0, -1), empty: false });   // unreadable: never claim "empty"
-        errors.push({ path: prefix || '/', message: describeError(err) });
+        if(err !== CANCELLED){
+          if(prefix) dirs.push({ path: prefix.slice(0, -1), empty: false });   // unreadable: never claim "empty"
+          errors.push({ path: prefix || '/', message: describeError(err) });
+        }
+      }finally{
+        dirSem.release();
       }
-    }
+      await Promise.all(tasks);
+    };
+
+    await walk(directoryHandle, '');
+    ctl.check();                                    // throws CANCELLED if the scan was cancelled meanwhile
     ctl.progress(files.length);
     return { files, errors, dirs };
   }
@@ -5377,6 +5409,23 @@ window.addEventListener('resize', ()=>{
     return true;
   }
 
+  // Middle file of a 3-way comparison against one or two others: every chunk of the middle file is read once
+  // and checked against each outer file that is still equal. Returns one boolean per outer file.
+  async function compareMiddleWithOthers(midFile, others, ctl){
+    const size = midFile.size;
+    const alive = others.map(() => true);
+    for(let off = 0; off < size && alive.some(Boolean); off += CHUNK_BYTES){
+      if(ctl) ctl.check();
+      const end = Math.min(off + CHUNK_BYTES, size);
+      const [mb, ...obs] = await Promise.all([
+        midFile.slice(off, end).arrayBuffer(),
+        ...others.map((f, i) => alive[i] ? f.slice(off, end).arrayBuffer() : null),
+      ]);
+      obs.forEach((ob, i) => { if(alive[i] && !buffersEqual(mb, ob)) alive[i] = false; });
+    }
+    return alive;
+  }
+
   function comparePathParts(x, y){
     const a = x.parts, b = y.parts;
     const n = Math.min(a.length, b.length);
@@ -5400,7 +5449,11 @@ window.addEventListener('resize', ()=>{
     const out = [];
     let done = 0;
     let lastYield = performance.now();
-    for(const path of keys){
+    // Files are compared several at a time: each comparison mostly waits on the browser's file reads,
+    // so overlapping them is much faster than going one by one. Results are sorted at the end.
+    const keyList = Array.from(keys);
+    let nextKey = 0;
+    const processPath = async (path) => {
       ctl.check();
       const l = leftFiles.get(path) || null;
       const m = three ? (midFiles.get(path) || null) : null;
@@ -5422,15 +5475,21 @@ window.addEventListener('resize', ()=>{
         }
       } else {
         // 3-way: compare each outer side with the middle one, so every column can be judged on its own.
+        // The middle file is read once and checked against both outer files at the same time.
         eq = { left: null, right: null };
         try{
+          const pending = [];
           for(const sd of ['left', 'right']){
             const o = sd === 'left' ? l : r;
             if(!(o && m)) continue;
             const was = known && known.get(path);                 // earlier result of this very pair, still valid
-            eq[sd] = was && was.eq && typeof was.eq[sd] === 'boolean'
-              ? was.eq[sd]
-              : o.size === m.size && await compareFileContents(o.file, m.file, ctl);
+            if(was && was.eq && typeof was.eq[sd] === 'boolean') eq[sd] = was.eq[sd];
+            else if(o.size !== m.size) eq[sd] = false;
+            else pending.push({ sd, file: o.file });
+          }
+          if(pending.length){
+            const res = await compareMiddleWithOthers(m.file, pending.map(x => x.file), ctl);
+            pending.forEach((x, i) => { eq[x.sd] = res[i]; });
           }
           status = present.length === 3 && eq.left && eq.right ? 'same' : 'different';
         }catch(err){
@@ -5442,11 +5501,18 @@ window.addEventListener('resize', ()=>{
       out.push({ path, parts: path.split('/'), status, left: l, mid: m, right: r, error, eq });
       done++;
       if(performance.now() - lastYield > 50){
+        lastYield = performance.now();
         ctl.progress(done, total, path);
         await yieldUi();
-        lastYield = performance.now();
       }
+    };
+    const workers = [];
+    for(let w = 0; w < Math.min(COMPARE_CONCURRENCY, keyList.length); w++){
+      workers.push((async () => {
+        while(nextKey < keyList.length) await processPath(keyList[nextKey++]);
+      })());
     }
+    await Promise.all(workers);
     // Empty directories are compared too. (A directory that has content on any side is judged through that content.)
     const dirMaps = [['left', leftDirs], ['mid', three ? midDirs : null], ['right', rightDirs]];
     const dirKeys = new Set();
