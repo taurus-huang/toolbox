@@ -163,6 +163,7 @@
     color:var(--muted);cursor:pointer;user-select:none;-webkit-user-select:none;
   }
   .tab:hover{background:var(--toolbar);}
+  .tab.dragging{transition:none;z-index:5;box-shadow:0 2px 8px rgba(0,0,0,.25);cursor:grabbing;}
   .tab.active{
     background:var(--sel-blue);border-color:var(--sel-blue);border-bottom:none;color:var(--text);
     z-index:1;
@@ -7123,6 +7124,69 @@ window.addEventListener('resize', ()=>{
     if(!t) return;
     if(e.target.closest('.tab-close')) closeTab(t); else switchTo(t);
   });
+  /* Drag a tab sideways to change its position. The tab follows the pointer; when its centre passes the
+     centre of a neighbour the two swap places. */
+  let justDragged = false;
+  bar.addEventListener('click', (e) => {               // the click that ends a drag must not be handled as a tab click
+    if(justDragged){ e.stopPropagation(); e.preventDefault(); justDragged = false; }
+  }, true);
+  bar.addEventListener('pointerdown', (e) => {
+    if(e.button !== 0 || e.target.closest('.tab-close')) return;
+    const startEl = e.target.closest('.tab');
+    if(!startEl) return;
+    const id = Number(startEl.dataset.id);
+    const startX = e.clientX;
+    let dragging = false, el = null, startLeft = 0;
+
+    const tabEls = () => Array.from(bar.querySelectorAll('.tab'));
+    const place = (x) => {
+      const desired = startLeft + (x - startX);                     // where the tab's left edge should be (bar coords)
+      el.style.transform = `translateX(${desired - el.offsetLeft}px)`;
+      const centre = desired + el.offsetWidth / 2;
+      const others = tabEls().filter(o => o !== el);
+      let target = 0;
+      for(const o of others) if(o.offsetLeft + o.offsetWidth / 2 < centre) target++;
+      const from = tabEls().indexOf(el);
+      if(target !== from){
+        const ref = others[target] || null;                          // insert before this one (null = at the end)
+        bar.insertBefore(el, ref || bar.querySelector('#tab-add'));
+        const t = tabs.find(x2 => x2.id === id);
+        tabs.splice(tabs.indexOf(t), 1);
+        tabs.splice(target, 0, t);
+        el.style.transform = `translateX(${desired - el.offsetLeft}px)`;
+      }
+    };
+    const onMove = (ev) => {
+      if(!dragging){
+        if(Math.abs(ev.clientX - startX) < 5) return;
+        dragging = true;
+        const t = tabs.find(x => x.id === id);
+        if(t && t !== active) switchTo(t);                           // dragging a tab also selects it (re-renders the strip)
+        el = bar.querySelector(`.tab[data-id="${id}"]`);
+        if(!el){ cleanup(); return; }
+        startLeft = el.offsetLeft;
+        el.classList.add('dragging');
+      }
+      place(ev.clientX);
+    };
+    const cleanup = () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
+    };
+    const onUp = () => {
+      cleanup();
+      if(dragging){
+        justDragged = true;
+        setTimeout(() => { justDragged = false; }, 0);
+        if(el){ el.classList.remove('dragging'); el.style.transform = ''; }
+      }
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
+  });
+
   bar.addEventListener('auxclick', (e) => {          // middle click closes, like a browser tab
     if(e.button !== 1) return;
     const el = e.target.closest('.tab');
